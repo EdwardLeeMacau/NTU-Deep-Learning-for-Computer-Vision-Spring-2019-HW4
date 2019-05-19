@@ -11,6 +11,9 @@ import torch
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from torch import nn, optim
 
+trimmedVideos_feature    = []
+fullLengthVideos_feature = []
+
 def set_optimizer_lr(optimizer, lr):
     """ set the learning rate in an optimizer, without rebuilding the whole optimizer """
     for param_group in optimizer.param_groups:

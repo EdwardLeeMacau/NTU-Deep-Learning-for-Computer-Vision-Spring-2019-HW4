@@ -113,7 +113,6 @@ class ResNet(nn.Module):
 
         return x
 
-
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -190,6 +189,21 @@ class BasicBlock(nn.Module):
 
         return out
 
+class Classifier(nn.Module):
+    def __init__(self, feature_dim, num_class=11, norm_layer=nn.BatchNorm1d, activation=nn.ReLU(inplace=True)):
+        self.fc = nn.Linear(feature_dim, num_class)
+        self.bn = norm_layer(num_class)
+        self.activation = activation
+
+    def forward(self, x):
+        x = self.fc(x)
+        x = self.bn(x)
+
+        if self.activation:
+            x = self.activation(x)
+        
+        return x
+
 def resnet50(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, (3, 4, 6, 3))
 
@@ -223,10 +237,14 @@ def resnet152(pretrained=False, **kwargs):
 def main():
     print("Choose device: {}".format(DEVICE))
 
-    model = resnet50(pretrained=True).to(DEVICE)
-    with open('resnet50_structure.txt', 'w') as textfile:
-        textfile.write(str(model))
-    torchsummary.summary(model, (3, 448, 448), device="cuda")
+    with open('resnet50_structure.txt', 'w') as textfile:    
+        feature_extractor = resnet50(pretrained=True).to(DEVICE)
+        torchsummary.summary(feature_extractor, (3, 448, 448), device="cuda")
+
+        classifier = Classifier(2048 * 14 * 14, 11)
+        torchsummary.summary(classifier, (2048 * 14 * 14), device='cuda')
+
+        textfile.write("\n".join((str(feature_extractor), str(classifier))))
 
 if __name__ == "__main__":
     main()

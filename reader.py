@@ -1,9 +1,22 @@
+"""
+  FileName     [ reader.py ]
+  PackageName  [ HW4 ]
+  Synopsis     [ Sample code to load an video ]
+
+  Library:
+    scikit-video    1.1.11
+    numpy           1.16.2
+    ffmpeg
+    ffprobe
+"""
+
 import numpy as np
 import skvideo.io
 import skimage.transform
 import csv
 import collections
 import os
+import pprint
 
 def readShortVideo(video_path, video_category, video_name, downsample_factor=12, rescale_factor=1):
     '''
@@ -40,7 +53,7 @@ def getVideoList(data_path):
     '''
     result = {}
 
-    with open (data_path) as f:
+    with open(data_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
             for column, value in row.items():
@@ -48,3 +61,21 @@ def getVideoList(data_path):
 
     od = collections.OrderedDict(sorted(result.items()))
     return od
+
+def unittest():
+    # print(ffmpeg.__file__)
+    # skvideo.setFFmpegPath("C://Users//Edward Lee//AppData//Local//Programs//Python//Python37//lib//site-packages//ffmpeg")
+
+    data_path  = "./hw4_data/TrimmedVideos/label/gt_train.csv"
+    video_list = getVideoList(data_path)
+
+    video_name     = video_list['Video_name'][0]
+    video_category = video_list['Video_category'][0]
+    video_path     = "./hw4_data/TrimmedVideos/video/train"
+
+    video = readShortVideo(video_path, video_category, video_name, downsample_factor=1, rescale_factor=1)
+    print(video.shape)
+
+if __name__ == "__main__":
+    unittest()
+    print("Unittest Passed!")
