@@ -51,30 +51,33 @@ def getVideoList(data_path):
 
     @return: ordered dictionary of videos and labels {'Action_labels', 'Nouns', 'End_times', 'Start_times', 'Video_category', 'Video_index', 'Video_name'}
     '''
-    result = {}
+    result    = {}
+    num_video = 0
 
     with open(data_path) as f:
         reader = csv.DictReader(f)
         for row in reader:
+            num_video += 1
             for column, value in row.items():
                 result.setdefault(column,[]).append(value)
 
     od = collections.OrderedDict(sorted(result.items()))
-    return od
+    return od, num_video
 
 def unittest():
     # print(ffmpeg.__file__)
     # skvideo.setFFmpegPath("C://Users//Edward Lee//AppData//Local//Programs//Python//Python37//lib//site-packages//ffmpeg")
 
     data_path  = "./hw4_data/TrimmedVideos/label/gt_train.csv"
-    video_list = getVideoList(data_path)
+    video_list, num_video = getVideoList(data_path)
+    video_path = "./hw4_data/TrimmedVideos/video/train"
 
-    video_name     = video_list['Video_name'][0]
-    video_category = video_list['Video_category'][0]
-    video_path     = "./hw4_data/TrimmedVideos/video/train"
+    for i in range(num_video):
+        video_name     = video_list['Video_name'][i]
+        video_category = video_list['Video_category'][i]
 
-    video = readShortVideo(video_path, video_category, video_name, downsample_factor=1, rescale_factor=1)
-    print(video.shape)
+        video = readShortVideo(video_path, video_category, video_name, downsample_factor=1, rescale_factor=1)
+        print(i, video.shape)
 
 if __name__ == "__main__":
     unittest()
