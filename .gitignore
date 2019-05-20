@@ -1,5 +1,5 @@
 # Dataset
-./hw4_data/*
+./hw4_data
 
 # python compiled file
 *.pyc

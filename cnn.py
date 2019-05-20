@@ -204,6 +204,26 @@ class Classifier(nn.Module):
         
         return x
 
+def resnet18(pretrained=False, **kwargs):
+    model = ResNet(BasicBlock, (2, 2, 2, 2))
+
+    if pretrained:
+        state_dict = model_zoo.load_url(model_urls['resnet18'])
+        del state_dict['fc.weight'], state_dict['fc.bias']
+        model.load_state_dict(state_dict)
+
+    return model 
+
+def resnet34(pretrained=False, **kwargs):
+    model = ResNet(BasicBlock, (3, 4, 6, 3))
+
+    if pretrained:
+        state_dict = model_zoo.load_url(model_urls['resnet34'])
+        del state_dict['fc.weight'], state_dict['fc.bias']
+        model.load_state_dict(state_dict)
+        
+    return model
+
 def resnet50(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, (3, 4, 6, 3))
 
@@ -238,13 +258,13 @@ def main():
     print("Choose device: {}".format(DEVICE))
 
     with open('resnet50_structure.txt', 'w') as textfile:    
-        feature_extractor = resnet50(pretrained=True).to(DEVICE)
-        torchsummary.summary(feature_extractor, (3, 448, 448), device="cuda")
+        extractor = resnet50(pretrained=True).to(DEVICE)
+        torchsummary.summary(extractor, (3, 448, 448), device="cuda")
 
         classifier = Classifier(2048 * 14 * 14, 11)
         torchsummary.summary(classifier, (2048 * 14 * 14), device='cuda')
 
-        textfile.write("\n".join((str(feature_extractor), str(classifier))))
+        textfile.write("\n".join((str(extractor), str(classifier))))
 
 if __name__ == "__main__":
     main()
