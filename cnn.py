@@ -1,7 +1,10 @@
 """
   FileName     [ cnn.py ]
   PackageName  [ HW4 ]
-  Synopsis     [ ResNet models for feature extrating ]
+  Synopsis     [ ResNet models for feature extracting ]
+
+  * Feature extracting models:
+    Resnet (Resnet18, Resnet34, Resnet50, Resnet101, Resnet152)
 """
 
 import torch
@@ -189,21 +192,6 @@ class BasicBlock(nn.Module):
 
         return out
 
-class Classifier(nn.Module):
-    def __init__(self, feature_dim, num_class=11, norm_layer=nn.BatchNorm1d, activation=nn.ReLU(inplace=True)):
-        self.fc = nn.Linear(feature_dim, num_class)
-        self.bn = norm_layer(num_class)
-        self.activation = activation
-
-    def forward(self, x):
-        x = self.fc(x)
-        x = self.bn(x)
-
-        if self.activation:
-            x = self.activation(x)
-        
-        return x
-
 def resnet18(pretrained=False, **kwargs):
     model = ResNet(BasicBlock, (2, 2, 2, 2))
 
@@ -255,16 +243,7 @@ def resnet152(pretrained=False, **kwargs):
     return model
 
 def main():
-    print("Choose device: {}".format(DEVICE))
-
-    with open('resnet50_structure.txt', 'w') as textfile:    
-        extractor = resnet50(pretrained=True).to(DEVICE)
-        torchsummary.summary(extractor, (3, 448, 448), device="cuda")
-
-        classifier = Classifier(2048 * 14 * 14, 11)
-        torchsummary.summary(classifier, (2048 * 14 * 14), device='cuda')
-
-        textfile.write("\n".join((str(extractor), str(classifier))))
+    raise NotImplementedError
 
 if __name__ == "__main__":
     main()
