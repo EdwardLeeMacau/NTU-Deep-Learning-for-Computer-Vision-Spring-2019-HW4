@@ -56,7 +56,7 @@ class ResNet(nn.Module):
         self.layer4 = self.make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
 
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.avgpool = nn.AvgPool2d(kernel_size=7, stride=1)
+        self.avgpool = nn.AvgPool2d(kernel_size=(8, 10), stride=1)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -111,9 +111,9 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-
+        # print(x.shape)
         x = self.avgpool(x)
-
+        # print(x.shape)
         return x
 
 class Bottleneck(nn.Module):

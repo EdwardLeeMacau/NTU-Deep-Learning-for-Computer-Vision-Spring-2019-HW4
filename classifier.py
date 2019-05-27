@@ -1,11 +1,9 @@
 """
-  FileName     [ cnn.py ]
+  FileName     [ classifier.py ]
   PackageName  [ HW4 ]
-  Synopsis     [ ResNet models for feature extracting ]
-
-  * Feature extracting models:
-    Resnet (Resnet18, Resnet34, Resnet50, Resnet101, Resnet152)
+  Synopsis     [ Fully connected models for predict labels ]
 """
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,15 +17,19 @@ import utils
 
 class Classifier(nn.Module):
     def __init__(self, feature_dim, num_class=11, norm_layer=nn.BatchNorm1d, activation=nn.ReLU(inplace=True)):
+        super(Classifier, self).__init__()
+        
         self.fc = nn.Linear(feature_dim, num_class)
         self.bn = norm_layer(num_class)
         self.activation = activation
 
     def forward(self, x):
         x = self.fc(x)
-        x = self.bn(x)
+
+        if self.bn:
+            x = self.bn(x)
 
         if self.activation:
             x = self.activation(x)
-        
+
         return x

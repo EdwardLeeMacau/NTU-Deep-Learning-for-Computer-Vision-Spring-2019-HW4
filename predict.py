@@ -23,7 +23,8 @@ from torchvision import datasets, transforms
 
 import dataset
 import utils
-from cnn import resnet50, Classifier
+from cnn import resnet50
+from classifier import Classifier
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
@@ -49,39 +50,6 @@ opt = parser.parse_args()
 # Set as true when the I/O shape of the model is fixed
 cudnn.benchmark = True
 DEVICE = utils.selectDevice()
-
-def val(extractor, classifier, loader, epoch, criterion):
-    extractor.eval()
-    classifier.eval()
-    
-    total_accs = 0
-    total_loss = 0
-    
-    #----------------------------
-    # Calculate the accuracy, loss
-    #----------------------------
-    for _, (data, label) in enumerate(loader, 1):
-        batchsize   = data.shape[0]
-        
-        data, label = data.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        
-        feature = extractor(data).view(batchsize, -1)
-        predict = classifier(feature)
-        
-        # loss
-        loss = criterion(predict, label)
-        total_loss += (loss.item() * batchsize)
-        
-        # Class Accuracy
-        predict = predict.cpu().detach().numpy()
-        label   = label.cpu().detach().numpy()
-        acc     = np.mean(np.argmax(predict, axis=1) == label)
-        total_accs += (acc * batchsize)
-
-    acc  = total_accs / len(loader.dataset)
-    loss = total_loss / len(loader.dataset)
-
-    return acc, loss
 
 def predict(extractor, classifier, loader):
     extractor.eval()
@@ -146,7 +114,7 @@ def main():
 if __name__ == "__main__":
     os.system("clear")
     
-    for key, value in vars(opt):
+    for key, value in vars(opt).items():
         print("{:15} {}".format(key, value))
     
     # check()

@@ -22,12 +22,14 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
-from cnn import resnet50
-from classifier import Classifier
 import dataset
-import utils
 import predict
+import utils
+from classifier import Classifier
+from cnn import resnet50
+from rnn import LSTM_Net
 
 # Set as true when the I/O shape of the model is fixed
 cudnn.benchmark = True
@@ -36,7 +38,7 @@ DEVICE = utils.selectDevice()
 parser = argparse.ArgumentParser()
 # Basic Training setting
 parser.add_argument("--epochs", type=int, default=50, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=16, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
 parser.add_argument("--milestones", type=int, nargs='*', default=[10], help="The epoch to decay the learning rate")
@@ -45,12 +47,17 @@ parser.add_argument("--weight_decay", type=float, default=1e-4, help="weight reg
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
+parser.add_argument("--dropout", default=0, help="the dropout probability of the recurrent network")
 parser.add_argument("--finetune", action="store_true", help="finetune the pretrained network")
 parser.add_argument("--normalize", default=True, action="store_true", help="normalized the dataset images")
-# Model parameter setting
+# Model dimension setting
 parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
-parser.add_argument("--sample", default=4, type=int, help="the number of frames to catch")
+parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
+parser.add_argument("--bidrection", default=False, action="store_true", help="Use the bidirectional recurrent network")
+parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
+# Model parameter initialization setting
+parser.add_argument("--init", type=str, help="define the network parameter initialization methods")
 # Message logging, model saving setting
 parser.add_argument("--tag", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
@@ -70,18 +77,18 @@ parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help=
 
 opt = parser.parse_args()
 
-def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, criterion):
+def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, criterion):
     """ Train the classificaiton network. """
     trainloss = 0.0
     trainaccs = 0.0
     extractor.train()
-    classifier.train()
+    recurrent.train()
     
     for index, (data, label) in enumerate(train_loader, 1):
         batchsize = label.shape[0]
-        data, label = data.to(DEVICE).squeeze(0).view(-1, 3, 240, 320), label.to(DEVICE).view(-1)
-        # print("Data.shape:  {}".format(data.shape))
-        # print("Label.shape: {}".format(label.shape))
+        data, label = data.to(DEVICE).squeeze(0), label.to(DEVICE)
+        print("Data.shape:  {}".format(data.shape))
+        print("Label.shape: {}".format(label.shape))
         # print(data)
         # print(data.dtype)
         
@@ -93,13 +100,14 @@ def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, cri
 
         #---------------------------------------
         # Get features, class predict:
-        #   data:          (batchsize * opt.sample, 3, 240, 320)
-        #   feature:       (batchsize, 2048 * opt.sample)
+        #   data:          (batchsize, frames, 3, 240, 320)
+        #   feature:       (batchsize, frames, 2048)
+        #   hidden_state:  (batchsize, frames, hidden_dim)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
         feature = extractor(data).view(batchsize, -1)
         # print("Feature.shape: {}".format(feature.shape))
-        predict = classifier(feature)
+        predict = recurrent(feature)
         # print("Predict.shape: {}".format(predict.shape))
 
         #---------------------------
@@ -127,13 +135,13 @@ def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, cri
     print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2f}%] [loss: {:.4f}]".format(
         epoch, len(train_loader), len(train_loader), 100 * trainaccs, trainloss))
 
-    return extractor, classifier, trainloss, trainaccs
+    return extractor, recurrent, trainloss, trainaccs
 
-def val(extractor, classifier, loader, epoch, criterion, log_interval=10):
-    """ Validate the classificaiton network. """
+def val(extractor, recurrent, loader, epoch, criterion, log_interval=10):
+    """ Validate the recurrent network. """
     extractor.eval()
-    classifier.eval()
-    
+    recurrent.eval()
+
     valaccs = 0.0
     valloss = 0.0
     
@@ -146,8 +154,8 @@ def val(extractor, classifier, loader, epoch, criterion, log_interval=10):
         data, label = data.view(-1, 3, 240, 320).to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
         
         feature = extractor(data).view(batchsize, -1)
-        predict = classifier(feature)
-        
+        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=True)
+
         # loss
         loss = criterion(predict, label)
         valloss += loss.item()
@@ -167,25 +175,36 @@ def val(extractor, classifier, loader, epoch, criterion, log_interval=10):
 
     return valaccs, valloss
 
-def single_frame_recognition():
-    """ Using 2D CNN network to recognize the action. """
+def continuous_frame_recognition():
+    """ Using RNN network to recognize the action. """
+    start_epoch = 1
+
     #-----------------------------------------------------
     # Create Model, optimizer, scheduler, and loss function
     #------------------------------------------------------
     extractor  = resnet50(pretrained=True).to(DEVICE)
-    classifier = Classifier(2048 * opt.sample, opt.output_dim).to(DEVICE)
+    recurrent  = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
+                        num_layers=opt.layers, bias=True, batch_first=True, dropout=opt.dropout, 
+                        bidirectional=opt.bidirection, seq_predict=False).to(DEVICE)
 
+    # Set optimizer
     if opt.optimizer == "Adam":
-        optimizer = optim.Adam(classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), weight_decay=opt.weight_decay)
+        optimizer = optim.Adam(recurrent.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), weight_decay=opt.weight_decay)
     elif opt.optimizer == "SGD":
-        optimizer = optim.SGD(classifier.parameters(), lr=opt.lr, momentum=opt.momentum, weight_decay=opt.weight_decay)
+        optimizer = optim.SGD(recurrent.parameters(), lr=opt.lr, momentum=opt.momentum, weight_decay=opt.weight_decay)
     else:
-        raise NotImplementedError
-
+        raise argparse.ArgumentError
+        
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=opt.milestones, gamma=opt.gamma)
     
+    # Load parameter
+    if opt.resume:
+        recurrent, optimizer, start_epoch, scheduler = utils.loadCheckpoint(opt.resume, extractor, recurrent, optimizer, scheduler, pretrained=(not opt.finetune))
+
+    # Set criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
 
+    # Set dataloader
     if opt.normalize:
         transform = transforms.Compose([
             transforms.ToTensor(),
@@ -194,14 +213,14 @@ def single_frame_recognition():
     else:
         transform = transforms.ToTensor()
 
-    train_set  = dataset.TrimmedVideos(opt.train, train=True, sample=4, transform=transform)
-    val_set    = dataset.TrimmedVideos(opt.val, train=False, sample=4, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.threads)
-    val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.threads)
+    train_set  = dataset.TrimmedVideos(opt.train, train=True, transform=transform)
+    val_set    = dataset.TrimmedVideos(opt.val, train=False, transform=transform)
+    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
+    val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
 
-    print("Train: \t{}".format(len(train_set)))
-    print("Val: \t{}".format(len(val_set)))
-    
+    # Show the memory used by neural network
+    print("{:.1f}".format(torch.cuda.memory_allocated() / 1024 / 1024))
+
     #------------------
     # Train the models
     #------------------
@@ -210,34 +229,35 @@ def single_frame_recognition():
     valloss   = []
     valaccs   = []
     epochs    = []
-    for epoch in range(1, opt.epochs + 1):
+
+    for epoch in range(start_epoch, opt.epochs + 1):
         scheduler.step()
         
         # Save the train loss and train accuracy
-        extractor, classifier, loss, acc = train(extractor, classifier, train_loader, val_loader, optimizer, epoch, criterion)
+        extractor, recurrent, loss, acc = train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, criterion)
         trainloss.append(loss)
         trainaccs.append(acc)
 
         # Save the validation loss and validation accuracy
-        acc, loss = val(extractor, classifier, val_loader, epoch, criterion)
+        acc, loss = val(extractor, recurrent, val_loader, epoch, criterion)
         valloss.append(loss)
         valaccs.append(acc)
 
         # Save the epochs
         epochs.append(epoch)
 
-        with open(os.path.join(opt.log, "problem_1", opt.tag, 'statistics.txt'), 'w') as textfile:
+        with open(os.path.join(opt.log, opt.tag, 'statistics.txt'), 'w') as textfile:
             textfile.write("\n".join(map(lambda x: str(x), (trainloss, trainaccs, valloss, valaccs, epochs))))
 
         if epoch % opt.save_interval == 0:
-            savepath = os.path.join(opt.checkpoints, "problem_1", opt.tag, str(epoch) + '.pth')
-            utils.saveCheckpoint(savepath, classifier, optimizer, scheduler, epoch)
+            savepath = os.path.join(opt.checkpoints, "problem_2", opt.tag, str(epoch) + '.pth')
+            utils.saveCheckpoint(savepath, extractor, recurrent, optimizer, scheduler, epoch)
 
             draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs)
             
-    return extractor, classifier
+    return extractor, recurrent
 
-def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_1",
+def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_2",
                 loss_filename="loss.png", loss_log_filename="loss_log.png", acc_filename="acc.png", acc_log_filename="acc_log.png"):
     # ----------------------------
     # Linear scale of loss curve
@@ -303,17 +323,17 @@ def main():
         raise IOError("Path {} doesn't exist".format(opt.val))
 
     os.makedirs(opt.checkpoints, exist_ok=True)
-    os.makedirs(os.path.join(opt.checkpoints, "problem_1"), exist_ok=True) 
-    os.makedirs(os.path.join(opt.checkpoints, "problem_1", opt.tag), exist_ok=True)
+    os.makedirs(os.path.join(opt.checkpoints, "problem_2"), exist_ok=True) 
+    os.makedirs(os.path.join(opt.checkpoints, "problem_2", opt.tag), exist_ok=True)
     os.makedirs(opt.log, exist_ok=True)
-    os.makedirs(os.path.join(opt.log, "problem_1"), exist_ok=True)
-    os.makedirs(os.path.join(opt.log, "problem_1", opt.tag), exist_ok=True)
+    os.makedirs(os.path.join(opt.log, "problem_2"), exist_ok=True)
+    os.makedirs(os.path.join(opt.log, "problem_2", opt.tag), exist_ok=True)
 
     # Write down the training details (opt)
-    details(os.path.join(opt.log, opt.tag, "train_setting.txt"))
+    details(os.path.join(opt.log, "problem_2", opt.tag, "train_setting.txt"))
 
     # Train the video recognition model with single frame (cnn) method
-    single_frame_recognition()
+    continuous_frame_recognition()
     
     return
 

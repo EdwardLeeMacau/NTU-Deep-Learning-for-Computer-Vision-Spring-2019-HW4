@@ -27,7 +27,6 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import reader
 import utils
 
-
 class TrimmedVideos(Dataset):
     def __init__(self, root, train: bool, downsample=1, rescale=1, sample=None, transform=None):
         if train:
@@ -57,15 +56,23 @@ class TrimmedVideos(Dataset):
         # Downsample for HW4.2, pick the frames with the downsampling rate
         # ----------------------------------------------------------------
         video = reader.readShortVideo(self.video_path, video_category, video_name, downsample_factor=self.downsample, rescale_factor=self.rescale)
-        total_frame = video.shape[0]
+        # print("Video.shape: {}".format(video.shape))
+        # print("Video.type:  {}".format(type(video)))
 
         if self.sample:
-            frame_to_catch = [int((i + 0.5) * (total_frame // self.sample)) for i in range(0, self.sample)]
-        
-        if self.transform:
-            frames = torch.cat([self.transform(video[f]).unsqueeze(0) for f in frame_to_catch], dim=0)
+            frame = np.arange(0, video.shape[0], (video.shape[0] // self.sample + 1))
+            video = video[frame]
 
-        return frames, video_label
+        if self.transform:
+            tensor = torch.zeros(video.shape[0], 3, 240, 320).type(torch.float32)
+            
+            for i in range(video.shape[0]):
+                tensor[i] = self.transform(video[i])
+
+        else:
+            tensor = torch.from_numpy(video).permute(0, 3, 1, 2).type(torch.float32) / 255.0
+        
+        return tensor, video_label
 
 class FullLengthVideos(Dataset):
     def __init__(self, root, train: bool, downsample=1, rescale=1, length=32, transform=None):

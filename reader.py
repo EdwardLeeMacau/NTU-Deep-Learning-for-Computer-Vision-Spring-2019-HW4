@@ -34,6 +34,15 @@ def readShortVideo(video_path, video_category, video_name, downsample_factor=12,
     filename = [file for file in os.listdir(filepath) if file.startswith(video_name)]
     video = os.path.join(filepath,filename[0])
 
+    # --------------------------------------
+    # skvideo.io.vreader()
+    #   return np.ndarray
+    #
+    # TODO: 
+    #   1. Remake the down sample function
+    #   2. Remake the rescale function
+    # --------------------------------------
+
     videogen = skvideo.io.vreader(video)
     frames = []
     for frameIdx, frame in enumerate(videogen):
