@@ -114,7 +114,7 @@ class ResNet(nn.Module):
         # print(x.shape)
         x = self.avgpool(x)
         # print(x.shape)
-        return x
+        return x.view(x.shape[0], -1)
 
 class Bottleneck(nn.Module):
     expansion = 4

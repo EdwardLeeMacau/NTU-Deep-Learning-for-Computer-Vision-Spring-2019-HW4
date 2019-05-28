@@ -89,9 +89,9 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
     for index, (data, label, seq_len) in enumerate(train_loader, 1):
         batchsize = label.shape[0]
         
-        data, label = data.to(DEVICE), label.to(DEVICE)
-        print("Data.shape: {}".format(data.shape))
-        print("Label.shape: {}".format(label.shape))
+        data, label = data.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
+        # print("Data.shape: {}".format(data.shape))
+        # print("Label.shape: {}".format(label.shape))
 
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
@@ -101,18 +101,16 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
 
         #---------------------------------------
         # Get features, class predict:
-        #   data:          (batchsize, frames, 3, 240, 320)
-        #   feature:       (batchsize, frames, 2048)
+        #   data:          (frames, batchsize, 3, 240, 320)
+        #   feature:       (frames, batchsize, 2048)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
-        feature = torch.Tensor([extractor(data[i]).view(batchsize, -1) for i in range(batchsize)])
-        feature = pad_sequence(feature, batch_first=False)
-        print("Feature.shape: {}".format(feature.shape))
+        feature = torch.cat([extractor(data[:,i]).unsqueeze(1) for i in range(batchsize)], dim=1)
+        # print("Feature.shape: {}".format(feature.shape))
 
         feature = pack_padded_sequence(feature, seq_len, batch_first=False)
-        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=False)
+        predict = recurrent(feature)
         print("Predict.shape: {}".format(predict.shape))
-        print(predict)
 
         #---------------------------
         # Compute the loss, accuracy
