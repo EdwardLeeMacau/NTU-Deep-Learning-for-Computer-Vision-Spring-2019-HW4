@@ -22,7 +22,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 
 import dataset
 import predict
@@ -32,7 +32,7 @@ from cnn import resnet50
 from rnn import LSTM_Net
 
 # Set as true when the I/O shape of the model is fixed
-cudnn.benchmark = True
+# cudnn.benchmark = True
 DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
@@ -50,10 +50,11 @@ parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of firs
 parser.add_argument("--dropout", default=0, help="the dropout probability of the recurrent network")
 parser.add_argument("--finetune", action="store_true", help="finetune the pretrained network")
 parser.add_argument("--normalize", default=True, action="store_true", help="normalized the dataset images")
+parser.add_argument("--downsample", default=4, type=int, help="the downsample ratio of the training data.")
 # Model dimension setting
 parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
-parser.add_argument("--bidrection", default=False, action="store_true", help="Use the bidirectional recurrent network")
+parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
 parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Model parameter initialization setting
@@ -72,6 +73,7 @@ parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
 parser.add_argument("--resume", type=str, help="Path to checkpoint (default: none)")
+parser.add_argument("--feature", action='store_true', help='If true, use the preprocressed feature files instead of the images')
 parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load val datasets")
 
@@ -84,14 +86,13 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
     extractor.train()
     recurrent.train()
     
-    for index, (data, label) in enumerate(train_loader, 1):
+    for index, (data, label, seq_len) in enumerate(train_loader, 1):
         batchsize = label.shape[0]
-        data, label = data.to(DEVICE).squeeze(0), label.to(DEVICE)
-        print("Data.shape:  {}".format(data.shape))
-        print("Label.shape: {}".format(label.shape))
-        # print(data)
-        # print(data.dtype)
         
+        data, label = data.to(DEVICE), label.to(DEVICE)
+        print("Data.shape: {}".format(data.shape))
+        print("Label.shape: {}".format(label.shape))
+
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
         #-----------------------------------------------------------------------------
@@ -102,13 +103,16 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
         # Get features, class predict:
         #   data:          (batchsize, frames, 3, 240, 320)
         #   feature:       (batchsize, frames, 2048)
-        #   hidden_state:  (batchsize, frames, hidden_dim)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
-        feature = extractor(data).view(batchsize, -1)
-        # print("Feature.shape: {}".format(feature.shape))
-        predict = recurrent(feature)
-        # print("Predict.shape: {}".format(predict.shape))
+        feature = torch.Tensor([extractor(data[i]).view(batchsize, -1) for i in range(batchsize)])
+        feature = pad_sequence(feature, batch_first=False)
+        print("Feature.shape: {}".format(feature.shape))
+
+        feature = pack_padded_sequence(feature, seq_len, batch_first=False)
+        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=False)
+        print("Predict.shape: {}".format(predict.shape))
+        print(predict)
 
         #---------------------------
         # Compute the loss, accuracy
@@ -149,12 +153,12 @@ def val(extractor, recurrent, loader, epoch, criterion, log_interval=10):
     # Calculate the accuracy, loss
     #----------------------------
     for index, (data, label) in enumerate(loader, 1):
-        batchsize   = data.shape[0]
+        batchsize   = label.shape[0]
         
-        data, label = data.view(-1, 3, 240, 320).to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
+        data, label = data.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
         
         feature = extractor(data).view(batchsize, -1)
-        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=True)
+        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=False)
 
         # loss
         loss = criterion(predict, label)
@@ -184,7 +188,7 @@ def continuous_frame_recognition():
     #------------------------------------------------------
     extractor  = resnet50(pretrained=True).to(DEVICE)
     recurrent  = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
-                        num_layers=opt.layers, bias=True, batch_first=True, dropout=opt.dropout, 
+                        num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
                         bidirectional=opt.bidirection, seq_predict=False).to(DEVICE)
 
     # Set optimizer
@@ -213,13 +217,13 @@ def continuous_frame_recognition():
     else:
         transform = transforms.ToTensor()
 
-    train_set  = dataset.TrimmedVideos(opt.train, train=True, transform=transform)
-    val_set    = dataset.TrimmedVideos(opt.val, train=False, transform=transform)
+    train_set  = dataset.TrimmedVideos(opt.train, train=True, downsample=opt.downsample, transform=transform)
+    val_set    = dataset.TrimmedVideos(opt.val, train=False, downsample=opt.downsample, transform=transform)
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
     val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
 
     # Show the memory used by neural network
-    print("{:.1f}".format(torch.cuda.memory_allocated() / 1024 / 1024))
+    print("The neural network allocated GPU with {:.1f} MB".format(torch.cuda.memory_allocated() / 1024 / 1024))
 
     #------------------
     # Train the models
@@ -321,6 +325,9 @@ def main():
 
     if not os.path.exists(opt.val):
         raise IOError("Path {} doesn't exist".format(opt.val))
+
+    if opt.feature and opt.finetune:
+        raise argparse.ArgumentError
 
     os.makedirs(opt.checkpoints, exist_ok=True)
     os.makedirs(os.path.join(opt.checkpoints, "problem_2"), exist_ok=True) 

@@ -21,6 +21,7 @@ from matplotlib import pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+from torch.nn.utils.rnn import pad_packed_sequence
 from tqdm import tqdm
 
 from cnn import resnet50
@@ -57,40 +58,49 @@ class LSTM_Net(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(hidden_dim, output_dim),
         )
-    def forward(self, seq_in):
+
+    def forward(self, x):
         """
           Params:
-          - seq_in: the tensor of frames
-                    if batch_first: (batchsize, length, feature_dim)
-                    if not:         (length, batchsize, feature_dim)
+          - x: the tensor of frames
+               if batch_first: (batchsize, length, feature_dim)
+               if not:         (length, batchsize, feature_dim)
           
           Return:
-          - out: the class prediction tensor: (batch, output_dim)
+          - x: the class prediction tensor: 
+               if seq_predict: (length, batch, output_dim)
+               if not:         (batch, output_dim)
         """
         # -------------------------------------------------------------------
         # lstm_out, hidden_state, cell_state = LSTM(x, (hidden_state, cell_state))
         # -> lstm_out is the hidden_state tensor of the highest lstm cell.
         # -------------------------------------------------------------------
-        lstm_out, (hidden_state, cell_state) = self.recurrent(seq_in)
+        x, _       = self.recurrent(x)
+        x, seq_len = pad_packed_sequence(x, batch_first=self.batch_first)
         
-        # get the last output of the model
+        # get the output per frame of the model
         if self.seq_predict:
-            raise NotImplementedError
+            batchsize = x.shape[0]
+            x = x.view(-1, self.hidden_dim)
+            x = self.fc_out(x)
+            x = x.view(-1, batchsize, self.output_dim)
+            
+            return x, seq_len
+        
+        # if only last output is needed.
+        if self.batch_first:
+            x = x[:,-1]
         else:
-            if self.batch_first:
-                out = lstm_out[:,-1,:]
-            else:
-                out = lstm_out[-1]
+            x = x[-1]
 
-        # through a linear layer to get the output
-        out = self.fc_out(out)
+        x = self.fc_out(x)
 
-        return out, (hidden_state, cell_state)
+        return x, seq_len
 
 def main():
     torch.manual_seed(1)
 
-    model = LSTM_Net(2048, 128, 11, num_layers=1, batch_first=True)
+    model = LSTM_Net(2048, 128, 11, num_layers=1, batch_first=False)
 
     # Way to initial the model parameters
     for param in model.recurrent.parameters():

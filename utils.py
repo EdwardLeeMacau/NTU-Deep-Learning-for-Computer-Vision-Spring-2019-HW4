@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch import nn, optim
 # from sklearn.preprocessing import LabelEncoder, OneHotEncoder
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 
 trimmedVideos_feature    = []
 fullLengthVideos_feature = []
@@ -39,33 +39,19 @@ def collate_fn(batch):
     """
     # ---------------------------------
     # batch[i][j]
+    #   the type of batch[i] is tuple
+    # 
     #   i=(0, size) means the batchsize
     #   j=(0, 1) means the data / label
     # ---------------------------------
     
-    # Sorted the batch with the video length with the ascending order
-    batch   = sorted(batch, key=(batch[i][0].shape[0] for i in range(len(batch))))
-    seq_len = [batch[i][0].shape[0] for i in range(len(batch))]
-
-    # Padding the shorter video with 0 in tail
-    for (data, _) in batch:
-        print("Before padding: {}".format(data.shape[0]))
-        if data.shape[0] < max(seq_len):
-            data = torch.cat([data, torch.zero(max(seq_len) - data.shape[0], 3, 240, 320)], dim=0)
-        print("After padding: {}".format(data.shape[0]))
-
-    print([x[0].shape[0] for x in batch])
+    # Sorted the batch with the video length with the descending order
+    batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
+    seq_len = [x[0].shape[0] for x in batch]
+    label   = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
+    batch   = pad_sequence([x[0] for x in batch], batch_first=True)
     
-    # -----------------------------------------------------------------
-    # Make the batch in the PackSequence type(input of recurrent model)
-    #   batch -> videos with the PackSequence() form
-    #   label -> the predict label in dimensior (batchsize, 1)
-    # -----------------------------------------------------------------
-    label = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
-    batch = torch.cat([x[j].unsqueeze(0) for x in batch], dim=0)
-    pack  = pack_padded_sequence(batch, seq_len, batch_first=True)
-    
-    return (pack, label)
+    return (batch, label, seq_len)
 
 def selectDevice():
     use_cuda = torch.cuda.is_available()
