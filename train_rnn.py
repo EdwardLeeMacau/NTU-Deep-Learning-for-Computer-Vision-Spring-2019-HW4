@@ -75,7 +75,7 @@ parser.add_argument("--threads", type=int, default=8, help="number of cpu thread
 parser.add_argument("--resume", type=str, help="Path to checkpoint (default: none)")
 parser.add_argument("--feature", action='store_true', help='If true, use the preprocressed feature files instead of the images')
 parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
-parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load val datasets")
+parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
 

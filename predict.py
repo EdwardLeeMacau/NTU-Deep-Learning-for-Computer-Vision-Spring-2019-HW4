@@ -24,26 +24,29 @@ from torchvision import datasets, transforms
 import dataset
 import utils
 from cnn import resnet50
-from classifier import Classifier
+from rnn import LSTM_Net
 
 parser = argparse.ArgumentParser()
+
 # Basic Training setting
-parser.add_argument("--batch_size", type=int, default=64, help="Images to read for every iteration")
-parser.add_argument("--normalize", default=False, action="store_true", help="normalized the dataset images")
-parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
+parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
+parser.add_argument("--downsample", default=4, type=int, help="the downsample ratio of the training data.")
+# Model dimension setting
+parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
+parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
+parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
+parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Message logging, model saving setting
-parser.add_argument("--tag", type=str, help="tag for this training")
-parser.add_argument("--checkpoints", type=str, help="path to load the checkpoints")
+parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
+parser.add_argument("--log_interval", type=int, default=10, help="interval between everytime logging the training status.")
 # Devices setting
 parser.add_argument("--gpus", type=int, default=1, help="nums of gpu to use")
-parser.add_argument("--threads", type=int, default=8, help="Number of cpu threads to use during batch generation")
 parser.add_argument("--cuda", default=True, help="Use cuda?")
+parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
-parser.add_argument("--dataset", type=str, help="The root of input dataset")
-parser.add_argument("--val", type=str, help="path to load val datasets")
-parser.add_argument("--detail", default="./train_details", help="the root directory to save the training details")
-# Saving prediction setting
-parser.add_argument("--output", default="./output/dann/svhn_pred.csv", help="The predict csvfile path.")
+parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
+parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load validation datasets")
+parser.add_argument("--output", default="./output/problem_2/p2_pred.csv", help="The predict csvfile path.")
 
 opt = parser.parse_args()
 
@@ -51,9 +54,10 @@ opt = parser.parse_args()
 cudnn.benchmark = True
 DEVICE = utils.selectDevice()
 
-def predict(extractor, classifier, loader):
+def predict(extractor, model, loader):
+    """ Predict the model's performance. """
     extractor.eval()
-    classifier.eval()
+    model.eval()
 
     pred_results = pd.DataFrame()
 
@@ -61,28 +65,25 @@ def predict(extractor, classifier, loader):
     # Calculate the accuracy, loss
     #----------------------------
     for index, (video, video_name) in enumerate(loader, 1):
-        batchsize   = len(img)
+        batchsize   = len(video_name)
 
         if index % opt.log_interval == 0:
             print("Predicting: {}".format(index * batchsize))
 
         video      = video.to(DEVICE)
         feature    = extractor(video).view(batchsize, -1)
-        predict    = classifier(feature).argmax(dim=1).cpu().tolist()
+        predict    = model(feature).argmax(dim=1).cpu().tolist()
         video_name = [name.split("/")[-1] for name in video_name]
 
-        list_of_tuple = list(zip(img_name, class_pred))
-        pred_result   = pd.DataFrame(list_of_tuple, columns=["image_name", "label"])
+        list_of_tuple = list(zip(video_name, predict))
+        pred_result   = pd.DataFrame(list_of_tuple, columns=["Video_name", "Action_labels"])
         pred_results  = pd.concat((pred_results, pred_result), axis=0, ignore_index=True)
 
     return pred_results
 
-def check():
-    #-------------------------
-    # Construce the DANN model
-    #-------------------------
+def model_structure_unittest():
     extractor  = resnet50(pretrained=True).to(DEVICE)
-    classifier = Classifier(2048 * 14 * 14, 11).to(DEVICE)    
+    classifier = LSTM_Net(2048, 128, 11, num_layers=opt.layers, bidirectional=opt.bidirection).to(DEVICE)    
     criterion = torch.nn.CrossEntropyLoss().to(DEVICE)
 
     return
@@ -99,8 +100,8 @@ def main():
     classifier = classifier.to(DEVICE)
     
     predict_set = dataset.TrimmedVideosPredict(opt.dataset, transform=transforms.Compose([
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ]))
     print("Dataset: {}".format(len(predict_set)))
     predict_loader = DataLoader(predict_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.threads)

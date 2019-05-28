@@ -75,8 +75,8 @@ class LSTM_Net(nn.Module):
         # lstm_out, hidden_state, cell_state = LSTM(x, (hidden_state, cell_state))
         # -> lstm_out is the hidden_state tensor of the highest lstm cell.
         # -------------------------------------------------------------------
-        x, _ = self.recurrent(x)
-        x, _ = pad_packed_sequence(x, batch_first=self.batch_first)
+        x, _       = self.recurrent(x)
+        x, seq_len = pad_packed_sequence(x, batch_first=self.batch_first)
         
         # get the output per frame of the model
         if self.seq_predict:
@@ -85,9 +85,9 @@ class LSTM_Net(nn.Module):
             x = self.fc_out(x)
             x = x.view(-1, batchsize, self.output_dim)
             
-            return x
+            return x, seq_len
         
-        # if only last output is needed.
+        # get the last 1 output if only it is needed.
         if self.batch_first:
             x = x[:,-1]
         else:
@@ -95,7 +95,7 @@ class LSTM_Net(nn.Module):
 
         x = self.fc_out(x)
 
-        return x
+        return x, seq_len
 
 def main():
     torch.manual_seed(1)
