@@ -60,12 +60,13 @@ class TrimmedVideos(Dataset):
         # Downsample for HW4.2, pick the frames with the downsampling rate
         # ----------------------------------------------------------------
         if self.feature:
-            video = reader.readShortVideoinFeature(self.video_path, video_category, video_name, downsample_factor=self.downsample)
+            video = reader.readShortFeature(self.feature_path, video_category, video_name, downsample_factor=self.downsample)
         else:
             video = reader.readShortVideo(self.video_path, video_category, video_name, downsample_factor=self.downsample, rescale_factor=self.rescale)
         
         if self.sample:
-            frame = np.arange(0, video.shape[0], (video.shape[0] // self.sample + 1))
+            step  = (video.shape[0] // self.sample) + 1
+            frame = np.arange(0, video.shape[0], step)
             video = video[frame]
 
         # ---------------------------------------------------
@@ -76,8 +77,8 @@ class TrimmedVideos(Dataset):
                 tensor = self.transform(video)
             else:
                 tensor = torch.from_numpy(video)
-
-            return tensor, video_label, video_category, video_name
+            
+            return tensor.squeeze(0), video_label
 
         # ---------------------------------------------------
         # Full video Output dimension: (frames, channel, height, width)
@@ -89,7 +90,7 @@ class TrimmedVideos(Dataset):
         else:
             tensor = torch.from_numpy(video).permute(0, 3, 1, 2).type(torch.float32) / 255.0
         
-        return tensor, video_label, video_category, video_name
+        return tensor, video_label
 
 class TrimmedVideosPredict(Dataset):
     def __init__(self, video_folder, downsample=1, rescale=1, sample=None, transform=None):
@@ -147,12 +148,9 @@ class FullLengthVideos(Dataset):
         video_label    = os.path.join(self.label_path, video_category + '.txt')
         frame_names    = sorted([name for name in os.listdir(os.path.join(self.video_path, video_category))])
 
-        raise NotImplementedError
-
         # -------------------------------------------------------------
         # Full video Output dimension: (frames, channel, height, width)
         # -------------------------------------------------------------
-
         num_frames  = len(frame_names)
         keep_frames = np.arange(0, num_frames, self.downsample)
         bias_frames = np.zeros_like(keep_frames)
@@ -165,7 +163,7 @@ class FullLengthVideos(Dataset):
         else:
             tensor = torch.from_numpy(video).permute(0, 3, 1, 2).type(torch.float32) / 255.0
         
-        return tensor, video_label, video_category, video_name
+        return tensor, video_label, video_category
 
 def read_feature_unittest(data_path):
     """ Read the videos in .npy format """
@@ -181,8 +179,8 @@ def read_feature_unittest(data_path):
 
         for index, (data, label, category, name) in enumerate(dataloader, 1):
             data = data.squeeze(0)
-            print("{:4d} {:16d} {:2d} {}".format(
-                index, data.shape, label[0], os.path.join(data_path, "feature", train_val, category[0], name[0] + ".npy")))
+            print("{:4d} {:16s} {:2d} {}".format(
+                index, str(list(data.shape)), label[0].item(), os.path.join(data_path, "feature", train_val, category[0], name[0] + ".npy")))
 
     return
 

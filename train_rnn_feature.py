@@ -1,7 +1,7 @@
 """
-  FileName     [ train_rnn.py ]
+  FileName     [ train_rnn_feature.py ]
   PackageName  [ HW4 ]
-  Synopsis     [ RNN action recognition training methods ]
+  Synopsis     [ RNN action recognition training methods, with preprocessed video features. ]
 """
 
 import argparse
@@ -37,20 +37,18 @@ DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
-parser.add_argument("--epochs", type=int, default=50, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=4, help="size of the batches")
-parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
+parser.add_argument("--epochs", type=int, default=2000, help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+parser.add_argument("--lr", type=float, default=1e-2, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
-parser.add_argument("--milestones", type=int, nargs='*', default=[10], help="The epoch to decay the learning rate")
-parser.add_argument("--optimizer", type=str, default="Adam", help="The optimizer to use in this training")
+parser.add_argument("--milestones", type=int, nargs='*', default=[5, 35, 50, 60], help="The epoch to decay the learning rate")
+parser.add_argument("--optimizer", type=str, default="SGD", help="The optimizer to use in this training")
 parser.add_argument("--weight_decay", type=float, default=1e-4, help="weight regularization")
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
-parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--dropout", default=0, help="the dropout probability of the recurrent network")
-parser.add_argument("--finetune", default=False, action="store_true", help="finetune the pretrained network")
-parser.add_argument("--normalize", default=False, action="store_true", help="normalized the dataset images")
-parser.add_argument("--downsample", default=4, type=int, help="the downsample ratio of the training data.")
+parser.add_argument("--b1", type=float, default=0.9, help="adam: decay of first order momentum of gradient")
+parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of second order momentum of gradient")
+parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
+parser.add_argument("--downsample", default=12, type=int, help="the downsample ratio of the training data.")
 # Model dimension setting
 parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
@@ -58,13 +56,14 @@ parser.add_argument("--bidirection", default=False, action="store_true", help="U
 parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Model parameter initialization setting
-parser.add_argument("--init", type=str, help="define the network parameter initialization methods")
+parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
+parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190530_adam_1_single_direction", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
-parser.add_argument("--log_interval", type=int, default=10, help="interval between everytime logging the training status.")
+parser.add_argument("--log_interval", type=int, default=100, help="interval between everytime logging the training status.")
 parser.add_argument("--val_interval", type=int, default=100, help="interval between everytime validating the model performance.")
 parser.add_argument("--log", default="./log", help="the root directory to save the training details")
 # Devices setting
@@ -73,26 +72,22 @@ parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
 parser.add_argument("--resume", type=str, help="Path to checkpoint (default: none)")
-parser.add_argument("--feature", action='store_true', help='If true, use the preprocressed feature files instead of the images')
+parser.add_argument("--feature", default=True, action='store_true', help='If true, use the preprocressed feature files instead of the images')
 parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
 
-def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, criterion):
+def train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss):
     """ Train the classificaiton network. """
     trainloss = 0.0
     trainaccs = 0.0
-    extractor.train()
     recurrent.train()
     
-    for index, (data, label, seq_len) in enumerate(train_loader, 1):
-        batchsize = label.shape[0]
+    for index, (feature, label, _) in enumerate(train_loader, 1):
+        feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
+        # print(feature)
         
-        data, label = data.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        # print("Data.shape: {}".format(data.shape))
-        # print("Label.shape: {}".format(label.shape))
-
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
         #-----------------------------------------------------------------------------
@@ -101,16 +96,12 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
 
         #---------------------------------------
         # Get features, class predict:
-        #   data:          (frames, batchsize, 3, 240, 320)
         #   feature:       (frames, batchsize, 2048)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
-        feature = torch.cat([extractor(data[:,i]).unsqueeze(1) for i in range(batchsize)], dim=1)
-        # print("Feature.shape: {}".format(feature.shape))
-
-        feature = pack_padded_sequence(feature, seq_len, batch_first=False)
         predict = recurrent(feature)
-        print("Predict.shape: {}".format(predict.shape))
+        # print(predict)
+        # print("Predict.shape: {}".format(predict.shape))
 
         #---------------------------
         # Compute the loss, accuracy
@@ -134,14 +125,13 @@ def train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, crit
     # Print the average performance at the end time of each epoch
     trainloss = trainloss / len(train_loader)
     trainaccs = trainaccs / len(train_loader)
-    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-            epoch, len(train_loader), len(train_loader), trainaccs, trainloss))
+    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%})] [loss: {:.4f} ({:+.4f})]".format(
+            epoch, len(train_loader), len(train_loader), trainaccs, trainaccs - max_trainaccs, trainloss, trainloss - min_trainloss))
 
-    return extractor, recurrent, trainloss, trainaccs
+    return recurrent, trainloss, trainaccs
 
-def val(extractor, recurrent, loader, epoch, criterion, log_interval=10):
+def val(recurrent, loader, epoch, criterion, log_interval=10):
     """ Validate the recurrent network. """
-    extractor.eval()
     recurrent.eval()
 
     valaccs = 0.0
@@ -150,13 +140,9 @@ def val(extractor, recurrent, loader, epoch, criterion, log_interval=10):
     #----------------------------
     # Calculate the accuracy, loss
     #----------------------------
-    for index, (data, label) in enumerate(loader, 1):
-        batchsize   = label.shape[0]
-        
-        data, label = data.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        
-        feature = extractor(data).view(batchsize, -1)
-        predict, _ = pad_packed_sequence(recurrent(feature), batch_first=False)
+    for index, (feature, label, _) in enumerate(loader, 1):
+        feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
+        predict = recurrent(feature)
 
         # loss
         loss = criterion(predict, label)
@@ -168,8 +154,8 @@ def val(extractor, recurrent, loader, epoch, criterion, log_interval=10):
         acc     = np.mean(np.argmax(predict, axis=1) == label)
         valaccs += acc
 
-        if index % log_interval == 0:
-            print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
+        # if index % opt.log_interval == 0:
+        #     print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
 
     valaccs = valaccs / len(loader)
     valloss = valloss / len(loader)
@@ -182,19 +168,63 @@ def continuous_frame_recognition():
     """ Using RNN network to recognize the action. """
     start_epoch = 1
 
-    #-----------------------------------------------------
+    # -----------------------------------------------------
     # Create Model, optimizer, scheduler, and loss function
-    #------------------------------------------------------
-    extractor  = resnet50(pretrained=True).to(DEVICE)
+    # -----------------------------------------------------
+    # extractor  = resnet50(pretrained=True).to(DEVICE)
     recurrent  = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
                         num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
                         bidirectional=opt.bidirection, seq_predict=False).to(DEVICE)
+
+    # ----------------------------------------------
+    # For signal direction LSTM
+    #   weight_ih_l0 torch.Size([512, 2048])
+    #   weight_hh_l0 torch.Size([512, 128])
+    #   bias_ih_l0 torch.Size([512])
+    #   bias_hh_l0 torch.Size([512])
+    #
+    # For bidirectional LSTM, reverse layer is added. 
+    #   weight_ih_l0_reverse torch.Size([512, 2048])
+    #   weight_hh_l0_reverse torch.Size([512, 128])
+    #   bias_ih_l0_reverse torch.Size([512])
+    #   bias_hh_l0_reverse torch.Size([512])
+    # ----------------------------------------------
+
+    # Weight_init
+    if "orthogonal" in opt.weight_init:
+        for layer, param in recurrent.recurrent.named_parameters():
+            print("{} {}".format(layer, param.shape))
+            if len(param.shape) >= 2:
+                nn.init.orthogonal_(param)
+
+        # raise NotImplementedError
+
+    # Bias_init
+    if "forget_bias_0" in opt.bias_init:
+        for layer, param in recurrent.recurrent.named_parameters():
+            if layer.startswith("bias"):
+                param[0.25, 0.5].fill_(0)
+
+    if "forget_bias_1" in opt.bias_init:
+        for layer, param in recurrent.recurrent.named_parameters():
+            if layer.startswith("bias"):
+                param[0.25, 0.5].fill_(1)
 
     # Set optimizer
     if opt.optimizer == "Adam":
         optimizer = optim.Adam(recurrent.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), weight_decay=opt.weight_decay)
     elif opt.optimizer == "SGD":
         optimizer = optim.SGD(recurrent.parameters(), lr=opt.lr, momentum=opt.momentum, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "ASGD":
+        optimizer = optim.ASGD(recurrent.parameters(), lr=opt.lr, lambd=1e-4, alpha=0.75, t0=1000000.0, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "Adadelta":
+        optimizer = optim.Adadelta(recurrent.parameters(), lr=opt.lr, rho=0.9, eps=1e-06, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "Adagrad":
+        optimizer = optim.Adagrad(recurrent.parameters(), lr=opt.lr, lr_decay=0, weight_decay=opt.weight_decay, initial_accumulator_value=0)
+    elif opt.optimizer == "SparseAdam":
+        optimizer = optim.SparseAdam(recurrent.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), eps=1e-08)
+    elif opt.optimizer == "Adamax":
+        optimizer = optim.Adamax(recurrent.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), eps=1e-08, weight_decay=opt.weight_dacay)
     else:
         raise argparse.ArgumentError
         
@@ -202,25 +232,17 @@ def continuous_frame_recognition():
     
     # Load parameter
     if opt.resume:
-        recurrent, optimizer, start_epoch, scheduler = utils.loadCheckpoint(opt.resume, extractor, recurrent, optimizer, scheduler, pretrained=(not opt.finetune))
+        recurrent, optimizer, start_epoch, scheduler = utils.loadCheckpoint(opt.resume, recurrent, optimizer, scheduler)
 
     # Set criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
 
     # Set dataloader
-    if opt.normalize:
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-    else:
-        transform = transforms.ToTensor()
+    transform = transforms.ToTensor()
 
-    train_set  = dataset.TrimmedVideos(opt.train, train=True, downsample=opt.downsample, feature=opt.feature, transform=transform)
-    val_set    = dataset.TrimmedVideos(opt.val, train=False, downsample=opt.downsample, feature=opt.feature, transform=transform)
+    train_set    = dataset.TrimmedVideos(opt.train, train=True, downsample=opt.downsample, feature=opt.feature, transform=transform)
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
-    val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
-
+    
     # Show the memory used by neural network
     print("The neural network allocated GPU with {:.1f} MB".format(torch.cuda.memory_allocated() / 1024 / 1024))
 
@@ -237,39 +259,69 @@ def continuous_frame_recognition():
         scheduler.step()
         
         # Save the train loss and train accuracy
-        extractor, recurrent, loss, acc = train(extractor, recurrent, train_loader, val_loader, optimizer, epoch, criterion)
+        max_trainaccs = max(trainaccs) if len(trainaccs) else 0
+        min_trainloss = min(trainloss) if len(trainloss) else 0
+        recurrent, loss, acc = train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss)
         trainloss.append(loss)
         trainaccs.append(acc)
 
-        # Save the validation loss and validation accuracy
-        acc, loss = val(extractor, recurrent, val_loader, epoch, criterion)
-        valloss.append(loss)
-        valaccs.append(acc)
+        # validate the model with several downsample ratio
+        loss_list, acc_list, label_list = [], [], []
+        for downsample in [2, 4, 6, 12]:
+            val_set    = dataset.TrimmedVideos(opt.val, train=False, downsample=downsample, feature=opt.feature, transform=transform)
+            val_loader = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
+            print("[Epoch {}] [Validation] [Downsample: {:2d}]".format(epoch, downsample))
+            acc, loss  = val(recurrent, val_loader, epoch, criterion)
+            
+            loss_list.append(loss)
+            acc_list.append(acc)
+            label_list.append('val_{}'.format(downsample))
+
+        valloss.append(loss_list)
+        valaccs.append(acc_list)
 
         # Save the epochs
         epochs.append(epoch)
 
-        with open(os.path.join(opt.log, opt.tag, 'statistics.txt'), 'w') as textfile:
-            textfile.write("\n".join(map(lambda x: str(x), (trainloss, trainaccs, valloss, valaccs, epochs))))
+        # with open(os.path.join(opt.log, "problem_2", opt.tag, 'statistics.txt'), 'w') as textfile:
+        #     textfile.write("\n".join(map(lambda x: str(x), (trainloss, trainaccs, valloss, valaccs, epochs))))
+        
+        records = list(map(lambda x: np.array(x), (trainloss, trainaccs, valloss, valaccs, epochs)))
+        for record, name in zip(records, ('trainloss.txt', 'trainaccs.txt', 'valloss.txt', 'valaccs.txt', 'epochs.txt')):
+            np.savetxt(os.path.join(opt.log, "problem_2", opt.tag, name), record)
 
         if epoch % opt.save_interval == 0:
             savepath = os.path.join(opt.checkpoints, "problem_2", opt.tag, str(epoch) + '.pth')
-            utils.saveCheckpoint(savepath, extractor, recurrent, optimizer, scheduler, epoch)
-
-            draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs)
+            utils.saveCheckpoint(savepath, recurrent, optimizer, scheduler, epoch)
+        
+        # Draw the accuracy / loss curve
+        draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs, "problem_2", label_list)
             
-    return extractor, recurrent
+    return recurrent
 
-def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_2",
+def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_2", label=['val_1', 'val_2', 'val_4', 'val_6', 'val_12'],
                 loss_filename="loss.png", loss_log_filename="loss_log.png", acc_filename="acc.png", acc_log_filename="acc_log.png"):
+    # Define the parameters
+    color = plt.get_cmap('Set1')
+    train_loss = np.array(train_loss, dtype=float)
+    val_loss   = np.array(val_loss, dtype=float).transpose()
+    train_acc  = np.array(train_acc, dtype=float)
+    val_acc    = np.array(val_acc, dtype=float).transpose()
+    
     # ----------------------------
     # Linear scale of loss curve
     # Log scale of loss curve
     # ----------------------------
     plt.clf()
     plt.figure(figsize=(12.8, 7.2))
-    plt.plot(x, train_loss, label="TrainLoss", color='b')
-    plt.plot(x, val_loss, label="ValLoss", color='r')
+    plt.plot(x, train_loss, label="train", color='b')
+    
+    if len(val_loss.shape) == 2:
+        for i in range(0, len(val_loss)):
+            plt.plot(x, val_loss[i], label=label[i], color=color(i))
+    elif len(val_loss.shape) == 1:
+        plt.plot(x, val_loss, label=label[0], color=color(0))
+    
     plt.plot(x, np.repeat(np.amin(val_loss), len(x)), ':')
     plt.legend(loc=0)
     plt.xlabel("Epoch(s)")
@@ -286,8 +338,14 @@ def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_2"
     # -------------------------------
     plt.clf()
     plt.figure(figsize=(12.8, 7.2))
-    plt.plot(x, train_acc, label="Train Acc", color='b')
-    plt.plot(x, val_acc, label="Val Acc", color='r')
+    plt.plot(x, train_acc, label="train", color='b')
+
+    if len(val_loss.shape) == 2:
+        for i in range(0, len(val_loss)):
+            plt.plot(x, val_acc[i], label=label[i], color=color(i))
+    elif len(val_loss.shape) == 1:
+        plt.plot(x, val_loss, label=label[0], color=color(0))
+
     plt.plot(x, np.repeat(np.amax(val_acc), len(x)), ':')
     plt.legend(loc=0)
     plt.xlabel("Epoch(s)")
@@ -297,6 +355,8 @@ def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_2"
     plt.yscale('log')
     plt.title("Accuracy vs Epochs")
     plt.savefig(os.path.join(opt.log, problem, opt.tag, acc_log_filename))
+
+    plt.close('all')
     return
 
 def details(path):
@@ -315,7 +375,7 @@ def details(path):
         for item, values in vars(opt).items():
             msg = "{:16} {}".format(item, values)
             print(msg)
-            textfile.write(msg)
+            textfile.write(msg + '\n')
 
 def main():
     """ Make the directory and check whether the dataset is exists """
@@ -324,9 +384,6 @@ def main():
 
     if not os.path.exists(opt.val):
         raise IOError("Path {} doesn't exist".format(opt.val))
-
-    if opt.feature and opt.finetune:
-        raise argparse.ArgumentError
 
     os.makedirs(opt.checkpoints, exist_ok=True)
     os.makedirs(os.path.join(opt.checkpoints, "problem_2"), exist_ok=True) 

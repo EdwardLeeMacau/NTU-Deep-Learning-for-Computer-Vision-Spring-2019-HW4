@@ -35,7 +35,7 @@ def collate_fn(batch):
           It's a list contains (datas, labels)
 
       Return:
-      - batch
+      - batch: the input tensors in form of PackSequence()
     """
     # ---------------------------------
     # batch[i][j]
@@ -48,8 +48,9 @@ def collate_fn(batch):
     # Sorted the batch with the video length with the descending order
     batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
     seq_len = [x[0].shape[0] for x in batch]
+    # print(seq_len)
     label   = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
-    batch   = pad_sequence([x[0] for x in batch], batch_first=False)
+    batch   = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
     
     return (batch, label, seq_len)
 
@@ -59,7 +60,7 @@ def selectDevice():
 
     return device
 
-def saveCheckpoint(checkpoint_path, feature: nn.Module, model: nn.Module, optimizer: optim, scheduler: optim.lr_scheduler.MultiStepLR, epoch, pretrained=True):
+def saveCheckpoint(checkpoint_path, model: nn.Module, optimizer: optim, scheduler: optim.lr_scheduler.MultiStepLR, epoch, feature=None):
     state = {
         'state_dict': model.state_dict(),
         'optimizer' : optimizer.state_dict(),
@@ -67,14 +68,14 @@ def saveCheckpoint(checkpoint_path, feature: nn.Module, model: nn.Module, optimi
         'scheduler': scheduler.state_dict()
     }
 
-    if not pretrained:
+    if feature:
         state['feature'] = feature.state_dict()
 
     torch.save(state, checkpoint_path)
 
     return
 
-def loadCheckpoint(checkpoint_path: str, feature: nn.Module, model: nn.Module, optimizer: optim, scheduler: optim.lr_scheduler.MultiStepLR, pretrained=True):
+def loadCheckpoint(checkpoint_path: str, model: nn.Module, optimizer: optim, scheduler: optim.lr_scheduler.MultiStepLR, feature=None):
     state = torch.load(checkpoint_path)
 
     resume_epoch = state['epoch']
@@ -82,14 +83,13 @@ def loadCheckpoint(checkpoint_path: str, feature: nn.Module, model: nn.Module, o
     optimizer.load_state_dict(state['optimizer'])
     scheduler.load_state_dict(state['scheduler'])
 
-    if not pretrained:
+    if feature:
         feature.load_state_dict(state['feature'])
-
-    print('model loaded from %s' % checkpoint_path)
+        return feature, model, optimizer, resume_epoch, scheduler
 
     return model, optimizer, resume_epoch, scheduler
 
-def saveModel(checkpoint_path: str, feature:nn.Module, model: nn.Module, pretrained=True):
+def saveModel(checkpoint_path: str, model: nn.Module, feature=None):
     """
       Params:
       - checkpoint_path: the directory of the model parameter
@@ -101,13 +101,12 @@ def saveModel(checkpoint_path: str, feature:nn.Module, model: nn.Module, pretrai
     """
     state = {'state_dict': model.state_dict()}
 
-    if not pretrained:
+    if feature:
         state['feature'] = feature.state_dict()
 
     torch.save(state, checkpoint_path)
-    print('model saved to %s' % checkpoint_path)
 
-def loadModel(checkpoint_path: str, feature: nn.Module, model: nn.Module, pretrained=True):
+def loadModel(checkpoint_path: str, model: nn.Module, feature=None):
     """
       Params:
       - checkpoint_path: the directory of the model parameter
@@ -118,14 +117,14 @@ def loadModel(checkpoint_path: str, feature: nn.Module, model: nn.Module, pretra
                     If False, load the model parameter from the saved file
     """
     state = torch.load(checkpoint_path)
+    
     model.load_state_dict(state['state_dict'])
-
-    if not pretrained:
+    
+    if feature:
         feature.load_state_dict(state['feature'])
+        return feature, model
 
-    print('Model loaded from %s' % checkpoint_path)
-
-    return feature, model
+    return model
 
 def checkpointToModel(checkpoint_path: str, model_path: str):
     state = torch.load(checkpoint_path)

@@ -33,11 +33,13 @@ DEVICE = utils.selectDevice()
 
 class LSTM_Net(nn.Module):
     """ The model to learn the video information by LSTM kernel """
-    def __init__(self, feature_dim, hidden_dim, output_dim, num_layers=1, bias=True, batch_first=False, dropout=0, bidirectional=False, seq_predict=False):
+    def __init__(self, feature_dim, hidden_dim, output_dim, num_layers=1, bias=True, batch_first=False, 
+                 dropout=0, bidirectional=False, seq_predict=False):
         """
           Params:
           - feature_dim: dimension of the feature vector extracted from frames
-          - hidden_dim: dimension of the hidden layer
+          - hidden_dim:  dimension of the hidden layer
+          - output_dim:  dimension of the classifier output
         """
         super(LSTM_Net, self).__init__()
 
@@ -51,7 +53,12 @@ class LSTM_Net(nn.Module):
         self.bidirectional = bidirectional
         self.seq_predict   = seq_predict
 
-        self.recurrent  = nn.LSTM(feature_dim, hidden_dim, num_layers=num_layers, bias=bias, batch_first=batch_first, dropout=dropout, bidirectional=bidirectional)
+        self.recurrent  = nn.LSTM(feature_dim, hidden_dim, num_layers=num_layers, bias=bias, batch_first=batch_first, 
+                                  dropout=dropout, bidirectional=bidirectional)
+        
+        if self.bidirectional:
+            hidden_dim *= 2
+
         self.fc_out     = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(inplace=True),
@@ -95,7 +102,7 @@ class LSTM_Net(nn.Module):
 
         x = self.fc_out(x)
 
-        return x, seq_len
+        return x#, seq_len
 
 def main():
     torch.manual_seed(1)

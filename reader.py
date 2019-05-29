@@ -56,7 +56,7 @@ def readShortVideo(video_path, video_category, video_name, downsample_factor=12,
 
     return np.array(frames).astype(np.uint8)
 
-def readShortVideoinFeature(video_path, video_category, video_name, downsample_factor=12):
+def readShortFeature(video_path, video_category, video_name, downsample_factor=12):
     '''
       Params:
       - video_path: video directory
@@ -71,7 +71,7 @@ def readShortVideoinFeature(video_path, video_category, video_name, downsample_f
 
     filepath = os.path.join(video_path, video_category)
     filename = [file for file in os.listdir(filepath) if file.startswith(video_name)][0]
-    features = np.load(os.path.join(filepath, filename), dtype=float)
+    features = np.load(os.path.join(filepath, filename)).astype(np.float32)
     keep     = np.arange(0, features.shape[0], downsample_factor)
     features = features[keep]
 
