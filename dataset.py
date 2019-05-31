@@ -126,16 +126,19 @@ class TrimmedVideosPredict(Dataset):
         return frames, video_label
 
 class FullLengthVideos(Dataset):
-    def __init__(self, root, train: bool, downsample=1, rescale=1, transform=None):
+    def __init__(self, root, train: bool, downsample=1, feature=False, rescale=1, transform=None):
         if train:
             self.label_path = os.path.join(root, "labels", "train")
             self.video_path = os.path.join(root, "videos", "train")
+            self.feature_path = os.path.join(root, "features", "train")
         else:
             self.label_path = os.path.join(root, "labels", "valid")
             self.video_path = os.path.join(root, "videos", "valid")
+            self.feature_path = os.path.join(root, "features", "valid")
 
         self.train      = train
         self.downsample = downsample
+        self.feature    = feature
         self.rescale    = rescale
         self.transform  = transform
         self.video_list = [folder for folder in os.listdir(self.video_path)]
@@ -145,25 +148,35 @@ class FullLengthVideos(Dataset):
 
     def __getitem__(self, index):
         video_category = self.video_list[index]
-        video_label    = os.path.join(self.label_path, video_category + '.txt')
-        frame_names    = sorted([name for name in os.listdir(os.path.join(self.video_path, video_category))])
+        video_label    = np.loadtxt(os.path.join(self.label_path, video_category + '.txt'))
+        frame_names    = sorted([os.path.join(self.video_path, video_category, name) for name in os.listdir(os.path.join(self.video_path, video_category))])
 
-        # -------------------------------------------------------------
-        # Full video Output dimension: (frames, channel, height, width)
-        # -------------------------------------------------------------
         num_frames  = len(frame_names)
         keep_frames = np.arange(0, num_frames, self.downsample)
-        bias_frames = np.zeros_like(keep_frames)
-        frame_names = frame_names[keep_frames + bias_frames]
+        # bias_frames = np.zeros_like(keep_frames)
+        # frame_names = frame_names[keep_frames + bias_frames]
+
+        # -------------------------------------------------------------
+        # Features Output dimension: (frames, 2048)
+        # -------------------------------------------------------------
+        if self.feature:
+            video = np.load(self.feature_path, video_category, "feature.npy")
+    
+            if self.transform:
+                tensor = self.transform(video)
+                return tensor.squeeze(0), video_label
+
+        # ---------------------------------------------------
+        # Full video Output dimension: (frames, channel, height, width)
+        # ---------------------------------------------------
+        video = [Image.open(name) for name in frame_names]
 
         if self.transform:
             tensor = torch.zeros(num_frames, 3, 240, 320).type(torch.float32)
             for i in range(num_frames):
-                tensor[i] = self.transform(Image.open(frame_names[self.downsample * i]))
-        else:
-            tensor = torch.from_numpy(video).permute(0, 3, 1, 2).type(torch.float32) / 255.0
+                tensor[i] = self.transform(video[i])
         
-        return tensor, video_label, video_category
+        return tensor.squeeze(0), video_label
 
 def read_feature_unittest(data_path):
     """ Read the videos in .npy format """

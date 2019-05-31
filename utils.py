@@ -15,6 +15,9 @@ from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_se
 trimmedVideos_feature    = []
 fullLengthVideos_feature = []
 
+def cosine_annealing_with_warm_restart(iteration, T_max, eta_min, last_epoch, factor):
+    return
+
 def set_optimizer_lr(optimizer, lr):
     """ set the learning rate in an optimizer, without rebuilding the whole optimizer """
     for param_group in optimizer.param_groups:

@@ -27,7 +27,6 @@ from tqdm import tqdm
 from cnn import resnet50
 import dataset
 import utils
-import predict
 
 DEVICE = utils.selectDevice()
 
