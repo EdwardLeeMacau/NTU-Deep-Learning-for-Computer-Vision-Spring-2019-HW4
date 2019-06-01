@@ -37,7 +37,7 @@ DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
-parser.add_argument("--epochs", type=int, default=2000, help="number of epochs of training")
+parser.add_argument("--epochs", type=int, default=100, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-2, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
@@ -45,7 +45,7 @@ parser.add_argument("--milestones", type=int, nargs='*', default=[5, 35, 50, 60]
 parser.add_argument("--optimizer", type=str, default="SGD", help="The optimizer to use in this training")
 parser.add_argument("--weight_decay", type=float, default=1e-4, help="weight regularization")
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
-parser.add_argument("--b1", type=float, default=0.9, help="adam: decay of first order momentum of gradient")
+parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of second order momentum of gradient")
 parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
 parser.add_argument("--downsample", default=12, type=int, help="the downsample ratio of the training data.")
@@ -59,7 +59,7 @@ parser.add_argument("--output_dim", default=11, type=int, help="the number of th
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190530_adam_1_single_direction", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190531", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
@@ -203,12 +203,18 @@ def continuous_frame_recognition():
     if "forget_bias_0" in opt.bias_init:
         for layer, param in recurrent.recurrent.named_parameters():
             if layer.startswith("bias"):
-                param[0.25, 0.5].fill_(0)
+                size  = param.shape[0]
+                start = int(size * 0.25)
+                end   = int(size * 0.5)
+                param[start: end].data.fill_(0)
 
     if "forget_bias_1" in opt.bias_init:
         for layer, param in recurrent.recurrent.named_parameters():
             if layer.startswith("bias"):
-                param[0.25, 0.5].fill_(1)
+                size  = param.shape[0]
+                start = int(size * 0.25)
+                end   = int(size * 0.5)
+                param[start: end].data.fill_(1)
 
     # Set optimizer
     if opt.optimizer == "Adam":
@@ -267,7 +273,7 @@ def continuous_frame_recognition():
 
         # validate the model with several downsample ratio
         loss_list, acc_list, label_list = [], [], []
-        for downsample in [2, 4, 6, 12]:
+        for downsample in [1, 2, 4, 6, 12]:
             val_set    = dataset.TrimmedVideos(opt.val, train=False, downsample=downsample, feature=opt.feature, transform=transform)
             val_loader = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
             print("[Epoch {}] [Validation] [Downsample: {:2d}]".format(epoch, downsample))

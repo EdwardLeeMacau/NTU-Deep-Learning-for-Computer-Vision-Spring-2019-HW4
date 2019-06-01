@@ -130,11 +130,11 @@ class FullLengthVideos(Dataset):
         if train:
             self.label_path = os.path.join(root, "labels", "train")
             self.video_path = os.path.join(root, "videos", "train")
-            self.feature_path = os.path.join(root, "features", "train")
+            self.feature_path = os.path.join(root, "feature", "train")
         else:
             self.label_path = os.path.join(root, "labels", "valid")
             self.video_path = os.path.join(root, "videos", "valid")
-            self.feature_path = os.path.join(root, "features", "valid")
+            self.feature_path = os.path.join(root, "feature", "valid")
 
         self.train      = train
         self.downsample = downsample
@@ -148,7 +148,7 @@ class FullLengthVideos(Dataset):
 
     def __getitem__(self, index):
         video_category = self.video_list[index]
-        video_label    = np.loadtxt(os.path.join(self.label_path, video_category + '.txt'))
+        video_label    = torch.from_numpy(np.loadtxt(os.path.join(self.label_path, video_category + '.txt'))).type(torch.LongTensor)
         frame_names    = sorted([os.path.join(self.video_path, video_category, name) for name in os.listdir(os.path.join(self.video_path, video_category))])
 
         num_frames  = len(frame_names)
@@ -160,11 +160,11 @@ class FullLengthVideos(Dataset):
         # Features Output dimension: (frames, 2048)
         # -------------------------------------------------------------
         if self.feature:
-            video = np.load(self.feature_path, video_category, "feature.npy")
+            video = np.load(os.path.join(self.feature_path, video_category + ".npy"))
     
             if self.transform:
-                tensor = self.transform(video)
-                return tensor.squeeze(0), video_label
+                tensor = self.transform(video).type(torch.float32)
+                return tensor.squeeze(0), video_label, video_category
 
         # ---------------------------------------------------
         # Full video Output dimension: (frames, channel, height, width)
@@ -176,7 +176,7 @@ class FullLengthVideos(Dataset):
             for i in range(num_frames):
                 tensor[i] = self.transform(video[i])
         
-        return tensor.squeeze(0), video_label
+        return tensor.squeeze(0), video_label, video_category
 
 def read_feature_unittest(data_path):
     """ Read the videos in .npy format """

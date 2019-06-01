@@ -60,7 +60,7 @@ def post_process(label):
     frames = len(label)
     return label
 
-def visualization(save_path, img_path, predict: np.array, label: np.array, sample=5, bar_height=20):
+def visualization(save_path, img_path, predict: np.array, post_predict: np.array, gt: np.array, sample=5, bar_height=20):
     """
       Visualize the video prediction performance with the timeline.
 
@@ -72,6 +72,8 @@ def visualization(save_path, img_path, predict: np.array, label: np.array, sampl
 
       Return: None
     """
+    if not os.path.exists(os.path.dirname(save_path)):
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
     # -----------------------------------
     # Load and smaple frames in the video
@@ -91,9 +93,8 @@ def visualization(save_path, img_path, predict: np.array, label: np.array, sampl
     # Make the color bar to show the labels
     # -------------------------------------
     h, w, c  = fig.shape
-    bar_gt   = convert_bar(label, w, bar_height=bar_height)
-    bar_pred = convert_bar(predict, w, bar_height=bar_height)
-    fig      = np.concatenate((bar_gt, fig, bar_pred), axis=0)
+    bars = np.concatenate([convert_bar(label, w, bar_height=20) for label in (gt, predict, post_predict)], axis=0)
+    fig  = np.concatenate((fig, bars), axis=0)
 
     plt.imsave(save_path, fig)
     
@@ -129,11 +130,10 @@ def convert_marks(label):
 
 def rectangle(start, end, length, max_width, height):
     """ Return the coordinate of (left, top) and (right, bottom) """
-    print(start, end, length, max_width, height)
     left  = int(start / length * max_width)
     right = int(end / length * max_width)
     
-    return (left, 0), (right, height)
+    return (left, 1), (right, height - 1)
 
 def post_process_unittest():
     label = np.random.rand(1, 768)

@@ -51,11 +51,21 @@ def collate_fn(batch):
     # Sorted the batch with the video length with the descending order
     batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
     seq_len = [x[0].shape[0] for x in batch]
-    # print(seq_len)
-    label   = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
-    batch   = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
+
+    label = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
+    batch = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
     
     return (batch, label, seq_len)
+
+def collate_fn_seq(batch):
+    batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
+    seq_len = [x[0].shape[0] for x in batch]
+
+    label      = pack_padded_sequence(pad_sequence([x[1] for x in batch], batch_first=False), seq_len, batch_first=False)
+    categories = [x[2] for x in batch]
+    batch      = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
+    
+    return (batch, label, seq_len, categories)
 
 def selectDevice():
     use_cuda = torch.cuda.is_available()

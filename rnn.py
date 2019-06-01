@@ -81,27 +81,45 @@ class LSTM_Net(nn.Module):
         # lstm_out, hidden_state, cell_state = LSTM(x, (hidden_state, cell_state))
         # -> lstm_out is the hidden_state tensor of the highest lstm cell.
         # -------------------------------------------------------------------
-        x, _       = self.recurrent(x)
+        x, _ = self.recurrent(x)
         x, seq_len = pad_packed_sequence(x, batch_first=self.batch_first)
         
         # get the output per frame of the model
-        if self.seq_predict:
-            batchsize = x.shape[0]
-            x = x.view(-1, self.hidden_dim)
-            x = self.fc_out(x)
-            x = x.view(-1, batchsize, self.output_dim)
+        # if self.seq_predict:
+        #     batchsize = x.shape[0]
+        #     x = x.view(-1, self.hidden_dim)
+        #     x = self.fc_out(x)
+        #     x = x.view(-1, batchsize, self.output_dim)
             
-            return x, seq_len
+        #     return x, seq_len
         
-        # get the last 1 output if only it is needed.
-        if self.batch_first:
-            x = x[:,-1]
-        else:
-            x = x[-1]
+        # --------------------------------------------
+        # Sequence-to-1 prediction:
+        #   get the last 1 output if only it is needed.
+        # --------------------------------------------
+        if not self.seq_predict:
+            if self.batch_first:
+                x = x[:,-1]
+            else:
+                x = x[-1]
+        
+        # -------------------------------------------
+        # Sequence-to-Sequence prediction:
+        #   get the output with the whole series
+        if self.seq_predict:
+            length = x.shape[0]
+            
+            if self.bidirectional:
+                x = x.view(-1, 2 * self.hidden_dim)
+            else:
+                x = x.view(-1, self.hidden_dim)
 
         x = self.fc_out(x)
 
-        return x#, seq_len
+        if self.seq_predict:
+            x = x.view(length, -1, self.output_dim)
+
+        return x
 
 def main():
     torch.manual_seed(1)

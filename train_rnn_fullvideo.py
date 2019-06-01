@@ -41,7 +41,7 @@ DEVICE = utils.selectDevice()
 parser = argparse.ArgumentParser()
 # Basic Training setting
 parser.add_argument("--epochs", type=int, default=500, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=4, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
 parser.add_argument("--milestones", type=int, nargs='*', default=[50, 100, 200], help="The epoch to decay the learning rate")
@@ -55,19 +55,20 @@ parser.add_argument("--downsample", default=4, type=int, help="the downsample ra
 # Model dimension setting
 parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
-parser.add_argument("--bidirection", default=True, action="store_true", help="Use the bidirectional recurrent network")
+parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
 parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Model parameter initialization setting
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190531", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190601", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
-parser.add_argument("--log_interval", type=int, default=100, help="interval between everytime logging the training status.")
-parser.add_argument("--val_interval", type=int, default=100, help="interval between everytime validating the model performance.")
+parser.add_argument("--log_interval", type=int, default=1, help="interval between everytime logging the training status.")
+parser.add_argument("--val_interval", type=int, default=1, help="interval between everytime validating the model performance.")
+parser.add_argument("--visual_interval", type=int, default=10, help="interval of epochs to visualize the prediction")
 parser.add_argument("--log", default="./log", help="the root directory to save the training details")
 # Devices setting
 parser.add_argument("--gpus", type=int, default=1, help="nums of gpu to use")
@@ -75,13 +76,13 @@ parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
 parser.add_argument("--resume", type=str, help="Path to checkpoint (trained in Problem 3)")
-parser.add_argument("--pretrain", default="", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
+parser.add_argument("--pretrain", default="/media/disk1/EdwardLee/video/checkpoint/problem_3/pretrain.pth", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
 parser.add_argument("--train", default="./hw4_data/FullLengthVideos", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/FullLengthVideos", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
 
-def train(recurrent, loader, optimizer, epoch, criterion):
+def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss):
     """ Train the recurrent network. """
     recurrent.train()
     
@@ -89,12 +90,10 @@ def train(recurrent, loader, optimizer, epoch, criterion):
     trainaccs = 0.0
     postaccs  = 0.0
     
-    for index, (feature, label, seq_len) in enumerate(loader, 1):
-        batchsize = label.shape[0]
+    for index, (feature, label, seq_len, category) in enumerate(loader, 1):
+        batchsize = len(seq_len)
         
-        feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        # print(seq_len)
-        # print(feature)
+        feature, label = feature.to(DEVICE), label.to(DEVICE)
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
         #-----------------------------------------------------------------------------
@@ -110,37 +109,56 @@ def train(recurrent, loader, optimizer, epoch, criterion):
         # print(predict)
         # print("Predict.shape: {}".format(predict.shape))
 
-        #---------------------------
-        # Compute the loss, accuracy
-        #---------------------------
+        #---------------------------------------
+        # Compute the loss, accuracy one-by-one
+        #---------------------------------------
+        label, _ = pad_packed_sequence(label, batch_first=False, padding_value=0) 
+        predict, label = predict.view(-1, opt.output_dim), label.view(-1)
+
         loss = criterion(predict, label)
         loss.backward()
         optimizer.step()
 
+        trainloss += loss.item()
+
         predict   = predict.cpu().detach().numpy()
         label     = label.cpu().detach().numpy()
-        acc       = np.mean(np.argmax(predict, axis=2) == label)
-        post_pred = visualize.post_process(np.argmax(predict, axis=2))
-        post_acc  = np.mean(np.argmax(post_pred, axis=2) == label)
-    
-        trainloss += loss.item()
-        trainaccs += acc
+        acc       = np.mean(np.argmax(predict, axis=1) == label)
+        post_pred = visualize.post_process(np.argmax(predict, axis=1))
+        post_acc  = np.mean(post_pred == label)
+
+        # for i in range(batchsize):
+        #     predict_i = predict[0: seq_len[i], i]
+        #     label_i   = label[0: seq_len[i], i]
+        #     acc_i     = np.mean(np.argmax(predict_i, axis=2) == label_i)
+        #     post_pred_i = visualize.post_process(np.argmax(predict_i, axis=2))
+        #     post_acc_i  = np.mean(np.argmax(post_pred_i, axis=2) == label_i)
+        #     trainaccs += acc_i
+        #     postaccs  += post_acc_i
+
+        trainaccs += acc / batchsize
         postaccs  += post_acc
 
         #-------------------------------
         # Print out the training message
         #-------------------------------
-        if index % opt.log_interval == 0:
-            print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-                epoch, index, len(loader), trainaccs / index, trainloss / index
-            ))
+        # if index % opt.log_interval == 0:
+        #     print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+        #         epoch, index, len(loader), trainaccs / batchsize / index, trainloss / index
+        #     ))
+
+        if epoch % opt.visual_interval == 0:
+            for i in range(batchsize):
+                savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "train_" + category[i] + ".png")
+                img_path = os.path.join(opt.train, "videos", "train", category[i])
+                visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
     # Print the average performance at the end time of each epoch
-    trainloss = trainloss / len(loader)
-    trainaccs = trainaccs / len(loader)
-    postaccs  = postaccs / len(loader)
-    print("[Epoch {}] [ {:4d}/{:4d} ] [pre_acc: {:.2%}] [post_acc: {:.2%}] [loss: {:.4f}]".format(
-            epoch, len(loader), len(loader), trainaccs, postaccs, trainloss))
+    trainloss = trainloss / len(loader.dataset)
+    trainaccs = trainaccs / len(loader.dataset)
+    postaccs  = postaccs / len(loader.dataset)
+    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%})] [post_acc: {:.2%}] [loss: {:.4f} ({:+.4f})]".format(
+            epoch, len(loader), len(loader), trainaccs, trainaccs - max_trainaccs, postaccs, trainloss, trainloss - min_trainloss))
 
     return recurrent, trainaccs, trainloss
 
@@ -148,36 +166,45 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
     """ Validate the recurrent network. """
     recurrent.eval()
 
-    valaccs = 0.0
-    valloss = 0.0
+    valaccs, valloss = [], []
     
-    #----------------------------
-    # Calculate the accuracy, loss
-    #----------------------------
-    for index, (feature, label, _) in enumerate(loader, 1):
-        batchsize   = label.shape[0]
+    #-------------------------------------------------------
+    # Calculate the accuracy, loss one-by-one(batchsize = 1)
+    #-------------------------------------------------------
+    for index, (feature, label, seq_len, category) in enumerate(loader, 1):
+        feature, label = feature.to(DEVICE), label.to(DEVICE)
         
-        feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        predict = recurrent(feature)
+        predict  = recurrent(feature)
+        label, _ = pad_packed_sequence(label, batch_first=False, padding_value=0)
+
+        predict, label = predict.view(-1, opt.output_dim), label.view(-1)
+
+        # print("Predict.shape: {}".format(predict.shape))
+        # print("Label.shape: {}".format(label.shape))
 
         #---------------------------
         # Compute the loss, accuracy
         #---------------------------
         loss = criterion(predict, label)
-        valloss += loss.item()
+        valloss.append(loss.item())
         
         predict = predict.cpu().detach().numpy()
         label   = label.cpu().detach().numpy()
-        acc     = np.mean(np.argmax(predict, axis=2) == label)
-        valaccs += acc
+        acc     = np.mean(np.argmax(predict, axis=1) == label)
+        post_pred = visualize.post_process(np.argmax(predict, axis=1))
+        valaccs.append(acc)
 
-        # if index % opt.log_interval == 0:
-        #     print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
+        if epoch % 1 == 0:
+            print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+                epoch, index, len(loader), len(loader), acc, loss.item()))
 
-    valaccs = valaccs / len(loader)
-    valloss = valloss / len(loader)
-    print("[Epoch {}] [Validation] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-            epoch, len(loader), len(loader), valaccs, valloss))
+        if epoch % opt.visual_interval == 0:
+            savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "test_" + category[0] + ".png")
+            img_path = os.path.join(opt.train, "videos", "valid", category[0])
+            visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
+
+    print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+        epoch, len(loader), len(loader), np.mean(valaccs), np.mean(valloss)))
 
     return valaccs, valloss
 
@@ -203,12 +230,16 @@ def temporal_action_segmentation():
     if "forget_bias_0" in opt.bias_init:
         for layer, param in recurrent.recurrent.named_parameters():
             if layer.startswith("bias"):
-                param[0.25, 0.5].fill_(0)
+                start = int(param.shape[0] * 0.25)
+                end   = int(param.shape[0] * 0.5)
+                param[start: end].data.fill_(0)
 
     if "forget_bias_1" in opt.bias_init:
         for layer, param in recurrent.recurrent.named_parameters():
             if layer.startswith("bias"):
-                param[0.25, 0.5].fill_(1)
+                start = int(param.shape[0] * 0.25)
+                end   = int(param.shape[0] * 0.5)
+                param[start: end].data.fill_(1)
 
     # Set optimizer
     if opt.optimizer == "Adam":
@@ -233,8 +264,10 @@ def temporal_action_segmentation():
     # Load parameter
     if opt.pretrain:
         recurrent = utils.loadModel(opt.pretrain, recurrent)
+        print("Loaded pretrain model: {}".format(opt.pretrain))
     if opt.resume:
         recurrent, optimizer, start_epoch, scheduler = utils.loadCheckpoint(opt.resume, recurrent, optimizer, scheduler)
+        print("Resume training: {}".format(opt.resume))
 
     # Set criterion
     criterion = nn.CrossEntropyLoss().to(DEVICE)
@@ -242,11 +275,11 @@ def temporal_action_segmentation():
     # Set dataloader
     transform = transforms.ToTensor()
 
-    train_set    = dataset.FullLengthVideos(opt.train, train=True, downsample=opt.downsample, feature=opt.feature, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
-    val_set      = dataset.FullLengthVideos(opt.val, train=False, downsample=opt.downsample, feature=opt.feature, transform=transform)
-    val_loader   = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
-        
+    train_set    = dataset.FullLengthVideos(opt.train, train=True, downsample=opt.downsample, feature=True, transform=transform)
+    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
+    val_set      = dataset.FullLengthVideos(opt.val, train=False, downsample=opt.downsample, feature=True, transform=transform)
+    val_loader   = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
+    
     # Show the memory used by neural network
     print("The neural network allocated GPU with {:.1f} MB".format(torch.cuda.memory_allocated() / 1024 / 1024))
 
@@ -258,12 +291,15 @@ def temporal_action_segmentation():
     valloss   = []
     valaccs   = []
     epochs    = []
+    categories = os.listdir(os.path.join(opt.val, "videos", "valid"))
 
     for epoch in range(start_epoch, opt.epochs + 1):
         scheduler.step()
         
         # Save the train loss and train accuracy
-        recurrent, acc, loss = train(recurrent, train_loader, optimizer, epoch, criterion)
+        max_trainaccs = max(trainaccs) if len(trainaccs) > 0 else 0
+        min_trainloss = min(trainloss) if len(trainloss) > 0 else 0
+        recurrent, acc, loss = train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss)
         trainloss.append(loss)
         trainaccs.append(acc)
 
@@ -279,25 +315,22 @@ def temporal_action_segmentation():
             np.savetxt(os.path.join(opt.log, "problem_3", opt.tag, y), np.array(x))
         
         if epoch % opt.save_interval == 0:
-            savepath = os.path.join(opt.checkpoints, "problem_2", opt.tag, str(epoch) + '.pth')
+            savepath = os.path.join(opt.checkpoints, "problem_3", opt.tag, str(epoch) + '.pth')
             utils.saveCheckpoint(savepath, recurrent, optimizer, scheduler, epoch)
-
-        if epoch % opt.visualize_interval == 0:
-            visualize.visualize()
         
         # Draw the accuracy / loss curve
-        draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs)
+        draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs, label=categories)
             
     return recurrent
 
-def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_3", label=['val_1', 'val_2', 'val_4', 'val_6', 'val_12'],
+def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_3", label=[],
                 loss_filename="loss.png", loss_log_filename="loss_log.png", acc_filename="acc.png", acc_log_filename="acc_log.png"):
     # Define the parameters
     color = plt.get_cmap('Set1')
     train_loss = np.array(train_loss, dtype=float)
-    val_loss   = np.array(val_loss, dtype=float)
+    val_loss   = np.array(val_loss, dtype=float).transpose()
     train_acc  = np.array(train_acc, dtype=float)
-    val_acc    = np.array(val_acc, dtype=float)
+    val_acc    = np.array(val_acc, dtype=float).transpose()
     
     # ----------------------------
     # Linear scale of loss curve
@@ -309,7 +342,7 @@ def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_3"
     
     if len(val_loss.shape) == 2:
         for i in range(0, len(val_loss)):
-            plt.plot(x, val_loss[i], label=label[i], color=color[i])
+            plt.plot(x, val_loss[i], label=label[i], color=color(i))
     elif len(val_loss.shape) == 1:
         plt.plot(x, val_loss, label=label[0], color=color[0])
     
@@ -333,7 +366,7 @@ def draw_graphs(train_loss, val_loss, train_acc, val_acc, x, problem="problem_3"
 
     if len(val_loss.shape) == 2:
         for i in range(0, len(val_loss)):
-            plt.plot(x, val_acc[i], label=label[i], color=color[i])
+            plt.plot(x, val_acc[i], label=label[i], color=color(i))
     elif len(val_loss.shape) == 1:
         plt.plot(x, val_loss, label=label[0], color=color[0])
 
