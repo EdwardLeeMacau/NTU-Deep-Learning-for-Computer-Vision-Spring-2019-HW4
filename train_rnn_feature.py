@@ -25,7 +25,6 @@ from tqdm import tqdm
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 
 import dataset
-import predict
 import utils
 from classifier import Classifier
 from cnn import resnet50
@@ -59,34 +58,32 @@ parser.add_argument("--output_dim", default=11, type=int, help="the number of th
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190531", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190602", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
-parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
 parser.add_argument("--log_interval", type=int, default=100, help="interval between everytime logging the training status.")
-parser.add_argument("--val_interval", type=int, default=100, help="interval between everytime validating the model performance.")
+parser.add_argument("--val_interval", type=int, default=1, help="interval between everytime validating the model performance.")
 parser.add_argument("--log", default="./log", help="the root directory to save the training details")
 # Devices setting
 parser.add_argument("--gpus", type=int, default=1, help="nums of gpu to use")
 parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
-parser.add_argument("--resume", type=str, help="Path to checkpoint (default: none)")
-parser.add_argument("--feature", default=True, action='store_true', help='If true, use the preprocressed feature files instead of the images')
+parser.add_argument("--pretrain", type=str, help="The pretrained rnn network")
+parser.add_argument("--resume", type=str, help="Path to checkpoint")
 parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
 
-def train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss):
+def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_trainloss):
     """ Train the classificaiton network. """
     trainloss = 0.0
     trainaccs = 0.0
     recurrent.train()
     
-    for index, (feature, label, _) in enumerate(train_loader, 1):
+    for index, (feature, label, _) in enumerate(loader, 1):
         feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        # print(feature)
         
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
@@ -100,9 +97,7 @@ def train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, m
         #   class predict: (batchsize, num_class)
         #---------------------------------------
         predict = recurrent(feature)
-        # print(predict)
-        # print("Predict.shape: {}".format(predict.shape))
-
+        
         #---------------------------
         # Compute the loss, accuracy
         #---------------------------
@@ -119,14 +114,14 @@ def train(recurrent, train_loader, optimizer, epoch, criterion, max_trainaccs, m
 
         if index % opt.log_interval == 0:
             print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-                epoch, index, len(train_loader), trainaccs / index, trainloss / index
+                epoch, index, len(loader), trainaccs / index, trainloss / index
             ))
 
     # Print the average performance at the end time of each epoch
-    trainloss = trainloss / len(train_loader)
-    trainaccs = trainaccs / len(train_loader)
+    trainloss = trainloss / len(loader)
+    trainaccs = trainaccs / len(loader)
     print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%})] [loss: {:.4f} ({:+.4f})]".format(
-            epoch, len(train_loader), len(train_loader), trainaccs, trainaccs - max_trainaccs, trainloss, trainloss - min_trainloss))
+            epoch, len(loader), len(loader), trainaccs, trainaccs - max_trainaccs, trainloss, trainloss - min_trainloss))
 
     return recurrent, trainloss, trainaccs
 
@@ -145,7 +140,7 @@ def val(recurrent, loader, epoch, criterion, log_interval=10):
         predict = recurrent(feature)
 
         # loss
-        loss = criterion(predict, label)
+        loss    = criterion(predict, label)
         valloss += loss.item()
         
         # Class Accuracy
@@ -154,13 +149,15 @@ def val(recurrent, loader, epoch, criterion, log_interval=10):
         acc     = np.mean(np.argmax(predict, axis=1) == label)
         valaccs += acc
 
-        # if index % opt.log_interval == 0:
-        #     print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
+        if index % opt.log_interval == 0:
+            print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
 
     valaccs = valaccs / len(loader)
     valloss = valloss / len(loader)
-    print("[Epoch {}] [Validation] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-            epoch, len(loader), len(loader), valaccs, valloss))
+
+    if epoch % opt.val_interval:
+        print("[Epoch {}] [Validation] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+                epoch, len(loader), len(loader), valaccs, valloss))
 
     return valaccs, valloss
 
@@ -171,10 +168,10 @@ def continuous_frame_recognition():
     # -----------------------------------------------------
     # Create Model, optimizer, scheduler, and loss function
     # -----------------------------------------------------
-    # extractor  = resnet50(pretrained=True).to(DEVICE)
-    recurrent  = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
-                        num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
-                        bidirectional=opt.bidirection, seq_predict=False).to(DEVICE)
+    # extractor = resnet50(pretrained=True).to(DEVICE)
+    recurrent = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
+                         num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
+                         bidirectional=opt.bidirection, seq_predict=False).to(DEVICE)
 
     # ----------------------------------------------
     # For signal direction LSTM
@@ -196,8 +193,6 @@ def continuous_frame_recognition():
             print("{} {}".format(layer, param.shape))
             if len(param.shape) >= 2:
                 nn.init.orthogonal_(param)
-
-        # raise NotImplementedError
 
     # Bias_init
     if "forget_bias_0" in opt.bias_init:
@@ -237,6 +232,8 @@ def continuous_frame_recognition():
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=opt.milestones, gamma=opt.gamma)
     
     # Load parameter
+    if opt.pretrain:
+        recurrent = utils.loadModel(opt.pretrain, recurrent)
     if opt.resume:
         recurrent, optimizer, start_epoch, scheduler = utils.loadCheckpoint(opt.resume, recurrent, optimizer, scheduler)
 
@@ -245,8 +242,13 @@ def continuous_frame_recognition():
 
     # Set dataloader
     transform = transforms.ToTensor()
+    
+    trainlabel   = os.path.join(opt.train, "label", "train")
+    trainfeature = os.path.join(opt.train, "feature", "train")
+    vallabel     = os.path.join(opt.val, "label", "valid")
+    valfeature   = os.path.join(opt.val, "feature", "valid")
 
-    train_set    = dataset.TrimmedVideos(opt.train, train=True, downsample=opt.downsample, feature=opt.feature, transform=transform)
+    train_set    = dataset.TrimmedVideos(None, trainlabel, trainfeature, downsample=opt.downsample, transform=transform)
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
     
     # Show the memory used by neural network
@@ -274,7 +276,7 @@ def continuous_frame_recognition():
         # validate the model with several downsample ratio
         loss_list, acc_list, label_list = [], [], []
         for downsample in [1, 2, 4, 6, 12]:
-            val_set    = dataset.TrimmedVideos(opt.val, train=False, downsample=downsample, feature=opt.feature, transform=transform)
+            val_set    = dataset.TrimmedVideos(None, vallabel, valfeature, downsample=downsample, transform=transform)
             val_loader = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn, num_workers=opt.threads)
             print("[Epoch {}] [Validation] [Downsample: {:2d}]".format(epoch, downsample))
             acc, loss  = val(recurrent, val_loader, epoch, criterion)
