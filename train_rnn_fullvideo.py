@@ -51,9 +51,14 @@ parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, D
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
-parser.add_argument("--downsample", default=4, type=int, help="the downsample ratio of the training data.")
+parser.add_argument("--downsample", default=1, type=int, help="the downsample ratio of the training data.")
+# Handle very long training data strategics
+parser.add_argument("--summarize", action="store_true", help="Remove the specific frames.")
+parser.add_argument("--sampling", action="store_true", help="")
+parser.add_argument("--k1", default=0, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0, assume (k1 <= k2)")
+parser.add_argument("--k2", default=0, type=int, help="the k2 parameter of the truncated backpropagation through time, entire sequence for k2=0, assume (k1 <= k2)")
 # Model dimension setting
-parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
+parser.add_argument("--activation", default="ReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
 parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
 parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
@@ -89,8 +94,10 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
     trainloss = 0.0
     trainaccs = 0.0
     postaccs  = 0.0
+    count_0s  = 0
+    total_len = 0
     
-    for index, (feature, label, seq_len, category) in enumerate(loader, 1):
+    for _, (feature, label, seq_len, category) in enumerate(loader, 1):
         batchsize = len(seq_len)
         
         feature, label = feature.to(DEVICE), label.to(DEVICE)
@@ -124,6 +131,9 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         predict   = predict.cpu().detach().numpy()
         label     = label.cpu().detach().numpy()
         acc       = np.mean(np.argmax(predict, axis=1) == label)
+        count_0   = (np.argmax(predict, axis=1) == 0)
+        count_0s  += count_0
+        total_len += seq_len[0]
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
         post_acc  = np.mean(post_pred == label)
 
@@ -157,8 +167,8 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
     trainloss = trainloss / len(loader.dataset)
     trainaccs = trainaccs / len(loader.dataset)
     postaccs  = postaccs / len(loader.dataset)
-    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%})] [post_acc: {:.2%}] [loss: {:.4f} ({:+.4f})]".format(
-            epoch, len(loader), len(loader), trainaccs, trainaccs - max_trainaccs, postaccs, trainloss, trainloss - min_trainloss))
+    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%}) -> {:.2%} ] [0: {:.2%}] [loss: {:.4f} ({:+.4f})]".format(
+            epoch, len(loader), len(loader), trainaccs, trainaccs - max_trainaccs, postaccs, count_0s / total_len, trainloss, trainloss - min_trainloss))
 
     return recurrent, trainaccs, trainloss
 
@@ -166,7 +176,9 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
     """ Validate the recurrent network. """
     recurrent.eval()
 
-    valaccs, valloss = [], []
+    valaccs, valpostaccs, valloss = [], [], []
+    count_0s  = 0
+    total_len = 0
     
     #-------------------------------------------------------
     # Calculate the accuracy, loss one-by-one(batchsize = 1)
@@ -192,19 +204,24 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
         label   = label.cpu().detach().numpy()
         acc     = np.mean(np.argmax(predict, axis=1) == label)
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
+        count_0   = (np.argmax(predict, axis=1) == 0)
+        count_0s  += count_0
+        total_len += seq_len[0]
+        post_acc = np.mean(post_pred == label)
         valaccs.append(acc)
+        valpostaccs.append(post_acc)
 
         if epoch % 1 == 0:
-            print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-                epoch, index, len(loader), len(loader), acc, loss.item()))
+            print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
+                epoch, index, len(loader), len(loader), acc, post_acc, count_0, loss.item()))
 
         if epoch % opt.visual_interval == 0:
             savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "test_" + category[0] + ".png")
             img_path = os.path.join(opt.train, "videos", "valid", category[0])
             visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
-    print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
-        epoch, len(loader), len(loader), np.mean(valaccs), np.mean(valloss)))
+    print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
+        epoch, len(loader), len(loader), sum(valaccs) / total_len, sum(valpostaccs) / total_len, count_0s / total_len, sum(valloss) / total_len))
 
     return valaccs, valloss
 
@@ -215,9 +232,9 @@ def temporal_action_segmentation():
     #------------------------------------------------------
     # Create Model, optimizer, scheduler, and loss function
     #------------------------------------------------------
-    recurrent  = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
-                        num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
-                        bidirectional=opt.bidirection, seq_predict=True).to(DEVICE)
+    recurrent = LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
+                         num_layers=opt.layers, bias=True, batch_first=False, dropout=opt.dropout, 
+                         bidirectional=opt.bidirection, seq_predict=True).to(DEVICE)
 
     # Weight_init
     if "orthogonal" in opt.weight_init:
@@ -275,9 +292,14 @@ def temporal_action_segmentation():
     # Set dataloader
     transform = transforms.ToTensor()
 
-    train_set    = dataset.FullLengthVideos(opt.train, train=True, downsample=opt.downsample, feature=True, transform=transform)
+    trainlabel   = os.path.join(opt.train, "labels", "train")
+    trainfeature = os.path.join(opt.train, "feature", "train")
+    vallabel     = os.path.join(opt.val, "labels", "valid")
+    valfeature   = os.path.join(opt.val, "feature", "valid")
+    
+    train_set    = dataset.FullLengthVideos(None, trainlabel, trainfeature, downsample=opt.downsample, transform=transform, summarize=opt.summarize, sampling=opt.sampling, truncate=(opt.k1, opt.k2))
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
-    val_set      = dataset.FullLengthVideos(opt.val, train=False, downsample=opt.downsample, feature=True, transform=transform)
+    val_set      = dataset.FullLengthVideos(None, vallabel, valfeature, downsample=opt.downsample, transform=transform, summarize=opt.summarize, sampling=opt.sampling, truncate=(opt.k1, opt.k2))
     val_loader   = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
     
     # Show the memory used by neural network
@@ -291,7 +313,7 @@ def temporal_action_segmentation():
     valloss   = []
     valaccs   = []
     epochs    = []
-    categories = os.listdir(os.path.join(opt.val, "videos", "valid"))
+    categories = [name.split('.')[0] for name in os.listdir(valfeature)]
 
     for epoch in range(start_epoch, opt.epochs + 1):
         scheduler.step()
@@ -425,5 +447,9 @@ def main():
     return
 
 if __name__ == "__main__":
-    os.system("clear")    
+    os.system("clear")
+
+    if opt.k1 > opt.k2:
+        raise NotImplementedError
+    
     main()

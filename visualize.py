@@ -149,7 +149,7 @@ def visualization_unittest():
 
     video_path = os.path.join(root_path, category[0])
     label = np.loadtxt(os.path.join(label_path, category[0] + '.txt'), dtype=int)
-    visualization('visualization.png', video_path, label, label, sample=5)
+    visualization('visualization.png', video_path, label, label, label, sample=5)
 
     return
 
