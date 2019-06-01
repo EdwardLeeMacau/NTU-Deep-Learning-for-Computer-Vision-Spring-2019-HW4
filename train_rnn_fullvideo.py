@@ -131,7 +131,7 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         predict   = predict.cpu().detach().numpy()
         label     = label.cpu().detach().numpy()
         acc       = np.mean(np.argmax(predict, axis=1) == label)
-        count_0   = (np.argmax(predict, axis=1) == 0)
+        count_0   = np.sum(np.argmax(predict, axis=1) == 0)
         count_0s  += count_0
         total_len += seq_len[0]
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
@@ -204,16 +204,16 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
         label   = label.cpu().detach().numpy()
         acc     = np.mean(np.argmax(predict, axis=1) == label)
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
-        count_0   = (np.argmax(predict, axis=1) == 0)
+        count_0   = np.sum(np.argmax(predict, axis=1) == 0)
         count_0s  += count_0
         total_len += seq_len[0]
         post_acc = np.mean(post_pred == label)
-        valaccs.append(acc)
-        valpostaccs.append(post_acc)
+        valaccs.append(acc * seq_len[0])
+        valpostaccs.append(post_acc * seq_len[0])
 
         if epoch % 1 == 0:
             print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
-                epoch, index, len(loader), len(loader), acc, post_acc, count_0, loss.item()))
+                epoch, index, len(loader), len(loader), acc, post_acc, count_0 / seq_len[0], loss.item()))
 
         if epoch % opt.visual_interval == 0:
             savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "test_" + category[0] + ".png")
@@ -221,7 +221,8 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
             visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
     print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
-        epoch, len(loader), len(loader), sum(valaccs) / total_len, sum(valpostaccs) / total_len, count_0s / total_len, sum(valloss) / total_len))
+           epoch, len(loader), len(loader), sum(valaccs) / total_len, sum(valpostaccs) / total_len, 
+           count_0s / total_len, sum(valloss) / len(loader)))
 
     return valaccs, valloss
 
