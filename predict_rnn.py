@@ -1,5 +1,5 @@
 """
-  FileName     [ predict.py ]
+  FileName     [ predict_rnn.py ]
   PackageName  [ HW4 ]
   Synopsis     [ (...) ]
 """
@@ -30,7 +30,8 @@ parser = argparse.ArgumentParser()
 
 # Basic Training setting
 parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
-parser.add_argument("--downsample", default=4, type=int, help="the downsample ratio of the training data.")
+parser.add_argument("--downsample", default=12, type=int, help="the downsample ratio of the training data.")
+parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
 # Model dimension setting
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
 parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
@@ -38,15 +39,15 @@ parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN'
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Message logging, model saving setting
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
-parser.add_argument("--log_interval", type=int, default=10, help="interval between everytime logging the training status.")
+parser.add_argument("--log_interval", type=int, default=100, help="interval between everytime logging the training status.")
 # Devices setting
 parser.add_argument("--gpus", type=int, default=1, help="nums of gpu to use")
 parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
-parser.add_argument("--train", default="./hw4_data/TrimmedVideos", type=str, help="path to load train datasets")
-parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help="path to load validation datasets")
-parser.add_argument("--output", default="./output/problem_2/p2_pred.csv", help="The predict csvfile path.")
+parser.add_argument("--video", default="./hw4_data/TrimmedVideos/video/train", type=str, help="path to the videos directory")
+parser.add_argument("--label", default="./hw4_data/TrimmedVideos/label/gt_train.csv", type=str, help="path of the label csv file")
+parser.add_argument("--output", required=True, default="./output/problem_2/p2_pred.csv", help="The predict csvfile path.")
 
 opt = parser.parse_args()
 
@@ -64,11 +65,11 @@ def predict(extractor, model, loader):
     #----------------------------
     # Calculate the accuracy, loss
     #----------------------------
-    for index, (video, video_name) in enumerate(loader, 1):
+    for index, (video, _, video_name) in enumerate(loader, 1):
         batchsize   = len(video_name)
 
         if index % opt.log_interval == 0:
-            print("Predicting: {}".format(index * batchsize))
+            print("[ {:4d}/{:4d} ]".format(len(index), len(loader)))
 
         video      = video.to(DEVICE)
         feature    = extractor(video).view(batchsize, -1)
@@ -81,25 +82,15 @@ def predict(extractor, model, loader):
 
     return pred_results
 
-def model_structure_unittest():
-    extractor  = resnet50(pretrained=True).to(DEVICE)
-    classifier = LSTM_Net(2048, 128, 11, num_layers=opt.layers, bidirectional=opt.bidirection).to(DEVICE)    
-    criterion = torch.nn.CrossEntropyLoss().to(DEVICE)
-
-    return
-
 def main():
-    #-------------------------
-    # Construce the DANN model
-    #-------------------------
-    if opt.output is None:
-        raise IOError("Please pass an outputpath argument with --output")
-
-    extractor, classifier = utils.loadModel(opt.model, resnet50(pretrained=False), Classifier())
-    extractor  = extractor.to(DEVICE)
-    classifier = classifier.to(DEVICE)
+    extractor, recurrent = utils.loadModel(opt.model, resnet50(pretrained=False), 
+                                           LSTM_Net(2048, opt.hidden_dim, opt.output_dim, 
+                                           num_layers=opt.layers, bias=True, dropout=opt.dropout, 
+                                           bidirectional=opt.bidirectional, seq_predict=False))
+    extractor = extractor.to(DEVICE)
+    recurrent = recurrent.to(DEVICE)
     
-    predict_set = dataset.TrimmedVideosPredict(opt.dataset, transform=transforms.Compose([
+    predict_set = dataset.TrimmedVideos(opt.video_path, opt.label_path, None, transform=transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ]))
@@ -107,8 +98,7 @@ def main():
     predict_loader = DataLoader(predict_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.threads)
     
     # Predict
-    pred_results = predict(extractor, classifier, predict_loader)
-    
+    pred_results = predict(extractor, extractor, predict_loader)
     pred_results.to_csv(opt.output, index=False)
     print("Output File have been written to {}".format(opt.output))
 
@@ -118,5 +108,4 @@ if __name__ == "__main__":
     for key, value in vars(opt).items():
         print("{:15} {}".format(key, value))
     
-    # check()
     main()
