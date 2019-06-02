@@ -31,7 +31,7 @@ from cnn import resnet50
 
 
 class TrimmedVideos(Dataset):
-    def __init__(self, video_path, label_path, feature_path, downsample=1, rescale=1, sample=None, feature=False, transform=None):
+    def __init__(self, video_path, label_path, feature_path, downsample=1, rescale=1, sample=None, transform=None):
         assert ((video_path is not None) or (feature_path is not None)), "Video_path or feature_path is needed for Dataset: FullLenghtVideos"
         
         self.label_path   = label_path

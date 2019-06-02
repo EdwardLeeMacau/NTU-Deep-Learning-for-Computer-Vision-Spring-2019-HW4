@@ -37,11 +37,11 @@ DEVICE = utils.selectDevice()
 parser = argparse.ArgumentParser()
 # Basic Training setting
 parser.add_argument("--epochs", type=int, default=100, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=2, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
-parser.add_argument("--milestones", type=int, nargs='*', default=[50, ], help="The epoch to decay the learning rate")
-parser.add_argument("--optimizer", type=str, default="Adam", help="The optimizer to use in this training")
+parser.add_argument("--milestones", type=int, nargs='*', default=[15, 50], help="The epoch to decay the learning rate")
+parser.add_argument("--optimizer", type=str, default="SGD", help="The optimizer to use in this training")
 parser.add_argument("--weight_decay", type=float, default=1e-5, help="weight regularization")
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
@@ -49,7 +49,7 @@ parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of firs
 parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
 parser.add_argument("--downsample", default=1, type=int, help="the downsample ratio of the training data.")
 # Handle very long training data strategics
-parser.add_argument("--summarize", default=0,  help="Remove the frames where the label is specified at the head / tail of the video.")
+parser.add_argument("--summarize", help="Remove the frames where the label is specified at the head / tail of the video.")
 parser.add_argument("--sampling", default=False, action="store_true", help="Random Sampling the (input, label) sequence")
 parser.add_argument("--k1", default=0, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0")
 parser.add_argument("--k2", default=0, type=int, help="the k2 parameter of the truncated backpropagation through time, entire sequence for k2=0")
@@ -63,7 +63,7 @@ parser.add_argument("--output_dim", default=11, type=int, help="the number of th
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190602", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190603", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
@@ -77,8 +77,9 @@ parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
 parser.add_argument("--resume", type=str, help="Path to checkpoint (trained in Problem 3)")
-parser.add_argument("--pretrain", default="/media/disk1/EdwardLee/video/checkpoint/problem_3/pretrain.pth", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
-parser.add_argument("--train", default="./hw4_data/FullLengthVideos", type=str, help="path to load train datasets")
+# parser.add_argument("--pretrain", default="/media/disk1/EdwardLee/video/checkpoint/problem_3/pretrain.pth", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
+parser.add_argument("--pretrain", type=str, default="/media/disk1/EdwardLee/video/checkpoint/problem_3/pretrain.pth")
+parser.add_argument("--train", default="./hw4_data/FullLengthVideosAugment", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/FullLengthVideos", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
@@ -186,7 +187,7 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
     #-------------------------------------------------------
     for index, (feature, label, seq_len, category) in enumerate(loader, 1):
         feature, label = feature.to(DEVICE), label.to(DEVICE)
-        
+
         predict, (h, c) = recurrent(feature)
         label, _ = pad_packed_sequence(label, batch_first=False, padding_value=0)
 
@@ -213,13 +214,13 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
         valaccs.append(acc)
         valpostaccs.append(post_acc)
 
-        if epoch % 1 == 0:
-            print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
-                epoch, index, len(loader), len(loader), acc, post_acc, count_0 / seq_len[0], loss.item()))
+        # if epoch % 1 == 0:
+        #     print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
+        #         epoch, index, len(loader), len(loader), acc, post_acc, count_0 / seq_len[0], loss.item()))
 
         if epoch % opt.visual_interval == 0:
             savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "test_" + category[0] + ".png")
-            img_path = os.path.join(opt.train, "videos", "valid", category[0])
+            img_path = os.path.join(opt.val, "videos", "valid", category[0])
             visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
     print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(

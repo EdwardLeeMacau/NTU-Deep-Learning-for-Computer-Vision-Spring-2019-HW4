@@ -96,7 +96,7 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         #   feature:       (frames, batchsize, 2048)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
-        predict = recurrent(feature)
+        predict, _ = recurrent(feature)
         
         #---------------------------
         # Compute the loss, accuracy
@@ -137,7 +137,7 @@ def val(recurrent, loader, epoch, criterion, log_interval=10):
     #----------------------------
     for index, (feature, label, _) in enumerate(loader, 1):
         feature, label = feature.to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
-        predict = recurrent(feature)
+        predict, _ = recurrent(feature)
 
         # loss
         loss    = criterion(predict, label)
@@ -155,7 +155,7 @@ def val(recurrent, loader, epoch, criterion, log_interval=10):
     valaccs = valaccs / len(loader)
     valloss = valloss / len(loader)
 
-    if epoch % opt.val_interval:
+    if epoch % opt.val_interval == 0:
         print("[Epoch {}] [Validation] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
                 epoch, len(loader), len(loader), valaccs, valloss))
 
@@ -243,9 +243,9 @@ def continuous_frame_recognition():
     # Set dataloader
     transform = transforms.ToTensor()
     
-    trainlabel   = os.path.join(opt.train, "label", "train")
+    trainlabel   = os.path.join(opt.train, "label", "gt_train.csv")
     trainfeature = os.path.join(opt.train, "feature", "train")
-    vallabel     = os.path.join(opt.val, "label", "valid")
+    vallabel     = os.path.join(opt.val, "label", "gt_valid.csv")
     valfeature   = os.path.join(opt.val, "feature", "valid")
 
     train_set    = dataset.TrimmedVideos(None, trainlabel, trainfeature, downsample=opt.downsample, transform=transform)
@@ -290,9 +290,6 @@ def continuous_frame_recognition():
 
         # Save the epochs
         epochs.append(epoch)
-
-        # with open(os.path.join(opt.log, "problem_2", opt.tag, 'statistics.txt'), 'w') as textfile:
-        #     textfile.write("\n".join(map(lambda x: str(x), (trainloss, trainaccs, valloss, valaccs, epochs))))
         
         records = list(map(lambda x: np.array(x), (trainloss, trainaccs, valloss, valaccs, epochs)))
         for record, name in zip(records, ('trainloss.txt', 'trainaccs.txt', 'valloss.txt', 'valaccs.txt', 'epochs.txt')):
