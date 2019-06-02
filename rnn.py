@@ -65,7 +65,7 @@ class LSTM_Net(nn.Module):
             nn.Linear(hidden_dim, output_dim),
         )
 
-    def forward(self, x):
+    def forward(self, x, h=None, c=None):
         """
           Params:
           - x: the tensor of frames
@@ -81,17 +81,11 @@ class LSTM_Net(nn.Module):
         # lstm_out, hidden_state, cell_state = LSTM(x, (hidden_state, cell_state))
         # -> lstm_out is the hidden_state tensor of the highest lstm cell.
         # -------------------------------------------------------------------
-        x, _ = self.recurrent(x)
+        if (h is not None) and (c is not None):
+            x, (h, c) = self.recurrent(x, (h, c))
+        else:
+            x, (h, c) = self.recurrent(x)
         x, seq_len = pad_packed_sequence(x, batch_first=self.batch_first)
-        
-        # get the output per frame of the model
-        # if self.seq_predict:
-        #     batchsize = x.shape[0]
-        #     x = x.view(-1, self.hidden_dim)
-        #     x = self.fc_out(x)
-        #     x = x.view(-1, batchsize, self.output_dim)
-            
-        #     return x, seq_len
         
         # --------------------------------------------
         # Sequence-to-1 prediction:
@@ -106,6 +100,7 @@ class LSTM_Net(nn.Module):
         # -------------------------------------------
         # Sequence-to-Sequence prediction:
         #   get the output with the whole series
+        # -------------------------------------------
         if self.seq_predict:
             length = x.shape[0]
             
@@ -119,7 +114,7 @@ class LSTM_Net(nn.Module):
         if self.seq_predict:
             x = x.view(length, -1, self.output_dim)
 
-        return x
+        return x, (h, c)
 
 def main():
     torch.manual_seed(1)

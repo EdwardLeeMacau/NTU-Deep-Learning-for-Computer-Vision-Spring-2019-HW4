@@ -29,17 +29,7 @@ from classifier import Classifier
 from cnn import resnet50
 from rnn import LSTM_Net
 
-# Set as true when the I/O shape of the model is fixed
-
 parser = argparse.ArgumentParser()
-# Basic setting
-parser.add_argument("--sample", default=5, type=int, help="the number of sample images of the video.")
-parser.add_argument("--kernel", default=3, type=int, help="the number of sample images of the video.")
-# Message logging, model saving setting
-parser.add_argument("--tag", default="20190529_2", type=str, help="tag for this training")
-# Load dataset, pretrain model setting
-parser.add_argument("--video", default="./hw4_data/FullLengthVideos/videos/train", type=str, help="path to load train datasets")
-parser.add_argument("--label", default="./hw4_data/FullLengthVideos/labels/train", type=str, help="path to load validation datasets")
 
 opt = parser.parse_args()
 
@@ -54,8 +44,7 @@ def post_process(label):
       - label: The action label after smoothing 
     """
     # -------------------------
-    # dimension:
-    #   label: (batch, frames)
+    # label_dim: (frames, batch)
     # -------------------------
     frames = len(label)
     return label

@@ -2,10 +2,6 @@
   FileName     [ train_rnn_fullvideo.py ]
   PackageName  [ HW4 ]
   Synopsis     [ RNN action recognition training methods. ]
-
-  Notes:
-  - Prepare the train / validation set
-  - Prepare a collate_fn, learn with various downsample rate
 """
 
 import argparse
@@ -40,23 +36,23 @@ DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
-parser.add_argument("--epochs", type=int, default=500, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+parser.add_argument("--epochs", type=int, default=100, help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=2, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
-parser.add_argument("--milestones", type=int, nargs='*', default=[50, 100, 200], help="The epoch to decay the learning rate")
+parser.add_argument("--milestones", type=int, nargs='*', default=[50, ], help="The epoch to decay the learning rate")
 parser.add_argument("--optimizer", type=str, default="Adam", help="The optimizer to use in this training")
-parser.add_argument("--weight_decay", type=float, default=1e-4, help="weight regularization")
+parser.add_argument("--weight_decay", type=float, default=1e-5, help="weight regularization")
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
 parser.add_argument("--downsample", default=1, type=int, help="the downsample ratio of the training data.")
 # Handle very long training data strategics
-parser.add_argument("--summarize", action="store_true", help="Remove the specific frames.")
-parser.add_argument("--sampling", action="store_true", help="")
-parser.add_argument("--k1", default=0, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0, assume (k1 <= k2)")
-parser.add_argument("--k2", default=0, type=int, help="the k2 parameter of the truncated backpropagation through time, entire sequence for k2=0, assume (k1 <= k2)")
+parser.add_argument("--summarize", default=0,  help="Remove the frames where the label is specified at the head / tail of the video.")
+parser.add_argument("--sampling", default=False, action="store_true", help="Random Sampling the (input, label) sequence")
+parser.add_argument("--k1", default=0, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0")
+parser.add_argument("--k2", default=0, type=int, help="the k2 parameter of the truncated backpropagation through time, entire sequence for k2=0")
 # Model dimension setting
 parser.add_argument("--activation", default="ReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=1, help="the number of the recurrent layers")
@@ -67,7 +63,7 @@ parser.add_argument("--output_dim", default=11, type=int, help="the number of th
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190601", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190602", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
@@ -112,17 +108,17 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         #   feature:       (frames, batchsize, 2048)
         #   frame_predict: (frames, batchsize, num_class)
         #---------------------------------------
-        predict = recurrent(feature)
-        # print(predict)
-        # print("Predict.shape: {}".format(predict.shape))
+        predict, (h, c) = recurrent(feature)
 
         #---------------------------------------
         # Compute the loss, accuracy one-by-one
         #---------------------------------------
         label, _ = pad_packed_sequence(label, batch_first=False, padding_value=0) 
         predict, label = predict.view(-1, opt.output_dim), label.view(-1)
+        # print("Predict.shape: {}".format(predict.shape))
+        # print("Label.shape: {}".format(label.shape))
 
-        loss = criterion(predict, label)
+        loss = criterion(predict[-opt.k2:], label[-opt.k2:])
         loss.backward()
         optimizer.step()
 
@@ -131,9 +127,13 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         predict   = predict.cpu().detach().numpy()
         label     = label.cpu().detach().numpy()
         acc       = np.mean(np.argmax(predict, axis=1) == label)
+        
         count_0   = np.sum(np.argmax(predict, axis=1) == 0)
         count_0s  += count_0
-        total_len += seq_len[0]
+        
+        for i in range(batchsize):
+            total_len += seq_len[i]
+        
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
         post_acc  = np.mean(post_pred == label)
 
@@ -146,22 +146,23 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         #     trainaccs += acc_i
         #     postaccs  += post_acc_i
 
-        trainaccs += acc / batchsize
-        postaccs  += post_acc
+        trainaccs += acc * batchsize
+        postaccs  += post_acc * batchsize
 
         #-------------------------------
         # Print out the training message
         #-------------------------------
+        # (Deprecated)
         # if index % opt.log_interval == 0:
         #     print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
         #         epoch, index, len(loader), trainaccs / batchsize / index, trainloss / index
         #     ))
 
-        if epoch % opt.visual_interval == 0:
-            for i in range(batchsize):
-                savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "train_" + category[i] + ".png")
-                img_path = os.path.join(opt.train, "videos", "train", category[i])
-                visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
+        # if epoch % opt.visual_interval == 0:
+        #     for i in range(batchsize):
+        #         savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "train_" + category[i] + ".png")
+        #         img_path = os.path.join(opt.train, "videos", "train", category[i])
+        #         visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
     # Print the average performance at the end time of each epoch
     trainloss = trainloss / len(loader.dataset)
@@ -186,7 +187,7 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
     for index, (feature, label, seq_len, category) in enumerate(loader, 1):
         feature, label = feature.to(DEVICE), label.to(DEVICE)
         
-        predict  = recurrent(feature)
+        predict, (h, c) = recurrent(feature)
         label, _ = pad_packed_sequence(label, batch_first=False, padding_value=0)
 
         predict, label = predict.view(-1, opt.output_dim), label.view(-1)
@@ -208,8 +209,9 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
         count_0s  += count_0
         total_len += seq_len[0]
         post_acc = np.mean(post_pred == label)
-        valaccs.append(acc * seq_len[0])
-        valpostaccs.append(post_acc * seq_len[0])
+        
+        valaccs.append(acc)
+        valpostaccs.append(post_acc)
 
         if epoch % 1 == 0:
             print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
@@ -221,7 +223,7 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
             visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
     print("[Epoch {}] [Validation  ] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
-           epoch, len(loader), len(loader), sum(valaccs) / total_len, sum(valpostaccs) / total_len, 
+           epoch, len(loader), len(loader), sum(valaccs) / len(loader) , sum(valpostaccs) / len(loader), 
            count_0s / total_len, sum(valloss) / len(loader)))
 
     return valaccs, valloss
@@ -294,13 +296,13 @@ def temporal_action_segmentation():
     transform = transforms.ToTensor()
 
     trainlabel   = os.path.join(opt.train, "labels", "train")
-    trainfeature = os.path.join(opt.train, "feature", "train")
+    trainfeature = os.path.join(opt.train, "feature", "train")    
     vallabel     = os.path.join(opt.val, "labels", "valid")
     valfeature   = os.path.join(opt.val, "feature", "valid")
     
     train_set    = dataset.FullLengthVideos(None, trainlabel, trainfeature, downsample=opt.downsample, transform=transform, summarize=opt.summarize, sampling=opt.sampling, truncate=(opt.k1, opt.k2))
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
-    val_set      = dataset.FullLengthVideos(None, vallabel, valfeature, downsample=opt.downsample, transform=transform, summarize=opt.summarize, sampling=opt.sampling, truncate=(opt.k1, opt.k2))
+    val_set      = dataset.FullLengthVideos(None, vallabel, valfeature, downsample=opt.downsample, transform=transform, summarize=None, sampling=opt.sampling, truncate=(0, 0))
     val_loader   = DataLoader(val_set, batch_size=1, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
     
     # Show the memory used by neural network
@@ -449,8 +451,4 @@ def main():
 
 if __name__ == "__main__":
     os.system("clear")
-
-    if opt.k1 > opt.k2:
-        raise NotImplementedError
-    
     main()

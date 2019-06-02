@@ -92,8 +92,9 @@ class TrimmedVideos(Dataset):
 
 class FullLengthVideos(Dataset):
     def __init__(self, video_path, label_path, feature_path, downsample=1, rescale=1, transform=None,
-                 summarize=False, sampling=False, truncate=False):        
-        assert ((video_path is not None) or (feature_path is not None)), "Video_path or feature_path is needed for Dataset: FullLenghtVideos"
+                 summarize=False, sampling=False, truncate=(0, 0)):        
+        assert ((video_path is not None) or (feature_path is not None)), "Video_path or feature_path is needed for Dataset: FullLenghtVideos."
+        assert ((not summarize) or (label_path is not None)), "Summarize can only be used in training mode, self.label_path shouldn't be 0."
         
         self.label_path   = label_path
         self.video_path   = video_path
@@ -118,28 +119,58 @@ class FullLengthVideos(Dataset):
     def __getitem__(self, index):
         video_category = self.categories[index]
         
+        # Read Labels
         video_label = None
         if self.label_path is not None:
             video_label = torch.from_numpy(np.loadtxt(os.path.join(self.label_path, video_category + '.txt'))).type(torch.LongTensor)
 
+        # Read videos
         if self.video_path is not None:
             frames = sorted([os.path.join(self.video_path, video_category, name) for name in os.listdir(os.path.join(self.video_path, video_category))])
-            
-            if self.rescale > 1:
-                raise NotImplementedError
-
             frames = [Image.open(name) for name in frames]
 
         if self.feature_path is not None:
             frames = np.load(os.path.join(self.feature_path, video_category + ".npy"))
         
+        # ----------------------------------------------------------
+        # downsample: 
+        # rescale:
+        # summarize:  Remove the frequently appears labels (The head and tail in this case)
+        # sampling:   Sampling the (input, label) sequence
+        # truncate:   TBPTT technique, need to crop the (input, label)
+        # ----------------------------------------------------------
         if self.downsample > 1:
             keep = np.arange(0, len(frames), self.downsample)
             bias = np.zeros_like(keep)
-            frames      = frames[keep + bias]
+            frames = frames[keep + bias]
             
             if self.label_path is not None:
-                video_label = video_label[keep + bias]        
+                video_label = video_label[keep + bias] 
+
+        if self.summarize is not None:
+            target = self.summarize
+
+            start, length, mark = 0, 0, []
+            for k, g in itertools.groupby(video_label):
+                length = len(list(g))
+                start += length
+                # print(start)
+                if (k == target) and (len(mark) == 0):
+                    mark.append(start)
+                    continue
+            mark.append(start - length)
+
+            # print("Summarize: ", mark[0], mark[1], len(frames))
+            frames = frames[mark[0]: mark[1]]
+            video_label = video_label[mark[0]: mark[1]]
+
+        if (self.truncate[0] > 0) or self.sampling:
+            length = self.truncate[0]
+            start  = random.randint(0, len(frames) - length)
+
+            frames = frames[start: start + length]
+            video_label = video_label[start: start + length]
+            # print("Sampling: ", start, start + length)
 
         # -------------------------------------------------------------
         # Features Output dimension: (frames, 2048)
@@ -148,6 +179,7 @@ class FullLengthVideos(Dataset):
         if self.transform:
             if self.feature_path is not None:
                 tensor = self.transform(frames).type(torch.float32)
+                
                 return tensor.squeeze(0), video_label, video_category
 
             if self.video_path is not None:
