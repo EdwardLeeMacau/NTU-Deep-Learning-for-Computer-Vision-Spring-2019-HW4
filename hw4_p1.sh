@@ -1,5 +1,5 @@
 # TODO: create shell script for Problem 1
-if ! [ -f "./DANN_mnistm.pth" ]; then
+if ! [ -f "./problem1.pth" ]; then
 	wget -O ./problem1.pth https://www.dropbox.com/s/03345sy74ir3s25/problem1.pth?dl=0
 fi
 

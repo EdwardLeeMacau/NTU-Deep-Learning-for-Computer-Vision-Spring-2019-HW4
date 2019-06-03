@@ -57,6 +57,25 @@ def collate_fn(batch):
     
     return (batch, label, seq_len)
 
+def collate_fn_valid(batch):
+    """
+      The collate_fn function used in valid code. 
+      
+      Main process:
+        Return the frames and seq_len 
+    """
+    batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
+    seq_len = [x[0].shape[0] for x in batch]
+
+    label = None
+    if batch[0][1] is not None:
+        label = pad_sequence([x[1] for x in batch], batch_first=False)
+    
+    batch      = torch.cat([x[0] for x in batch], dim=0)
+
+    return (batch, label, seq_len)
+
+
 def collate_fn_seq(batch):
     batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
     seq_len = [x[0].shape[0] for x in batch]
