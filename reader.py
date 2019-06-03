@@ -39,20 +39,20 @@ def readShortVideo(video_path, video_category, video_name, downsample_factor=12,
     # --------------------------------------
     # skvideo.io.vreader()
     #   return np.ndarray
-    #
-    # TODO: 
-    #   1. Remake the down sample function
-    #   2. Remake the rescale function
     # --------------------------------------
 
     videogen = skvideo.io.vreader(video)
+    
     frames = []
-    for frameIdx, frame in enumerate(videogen):
+    for frameIdx, frame in enumerate(videogen, 0):
         if frameIdx % downsample_factor == 0:
-            frame = skimage.transform.rescale(frame, rescale_factor, mode='constant', preserve_range=True, multichannel=True, anti_aliasing=True).astype(np.uint8)
+    #       frame = skimage.transform.rescale(frame, rescale_factor, mode='constant', preserve_range=True, multichannel=True, anti_aliasing=True).astype(np.uint8)
             frames.append(frame)
-        else:
-            continue
+    #     else:
+    #         continue
+
+    # keep   = np.arange(0, len(videogen), downsample_factor)
+    # frames = videogen[keep]
 
     return np.array(frames).astype(np.uint8)
 

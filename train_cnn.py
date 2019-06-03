@@ -163,7 +163,9 @@ def single_frame_recognition():
     # Create Model, optimizer, scheduler, and loss function
     #------------------------------------------------------
     extractor  = resnet50(pretrained=True).to(DEVICE)
-    classifier = Classifier(2048 * opt.sample, opt.output_dim).to(DEVICE)
+    classifier = Classifier(2048 * opt.sample, [2048], num_class=opt.output_dim).to(DEVICE)
+
+    print(classifier)
 
     # Set optimizer
     if opt.optimizer == "Adam":

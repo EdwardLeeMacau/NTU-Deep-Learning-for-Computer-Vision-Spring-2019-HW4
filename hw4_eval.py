@@ -19,16 +19,13 @@ parser.add_argument("--pred", default="./output/p1_valid.txt", help="The predict
 opt = parser.parse_args()
 
 def main():
-    gt, _ = reader.getVideoList(opt.gt)['Action_labels']
-    print(gt)
-    print(gt.shape)
+    gt, _ = reader.getVideoList(opt.gt)
+    gt    = np.array(gt['Action_labels']).astype(int)
 
-    predict = np.loadtxt(opt.predict, dtype=int)
-    print(predict)
-    print(predict.shape)
+    predict = np.loadtxt(opt.pred, dtype=int)
     
     acc = np.mean(predict == gt)
-    print("Accuracy: {}".format(acc))
+    print("Accuracy: {:.4%}".format(acc))
 
 if __name__ == "__main__":
     main()
