@@ -5,12 +5,10 @@
 """
 
 import argparse
-import datetime
 import logging
 import logging.config
 import os
 import random
-from datetime import date
 
 import numpy as np
 import torch
@@ -21,13 +19,11 @@ from matplotlib import pyplot as plt
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from tqdm import tqdm
 
 from cnn import resnet50
 from classifier import Classifier
 import dataset
 import utils
-import predict
 
 # Set as true when the I/O shape of the model is fixed
 cudnn.benchmark = True
@@ -35,7 +31,7 @@ DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
-parser.add_argument("--epochs", type=int, default=50, help="number of epochs of training")
+parser.add_argument("--epochs", type=int, default=100, help="number of epochs of training")
 parser.add_argument("--batch_size", type=int, default=16, help="size of the batches")
 parser.add_argument("--lr", type=float, default=1e-4, help="adam: learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
@@ -45,10 +41,9 @@ parser.add_argument("--weight_decay", type=float, default=1e-4, help="weight reg
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-parser.add_argument("--finetune", action="store_true", help="finetune the pretrained network")
 parser.add_argument("--normalize", default=True, action="store_true", help="normalized the dataset images")
 # Model parameter setting
-parser.add_argument("--activation", default="LeakyReLU", help="the activation function use at training")
+parser.add_argument("--activation", default="ReLU", help="the activation function use at training")
 parser.add_argument("--sample", default=4, type=int, help="the number of frames to catch")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Message logging, model saving setting
@@ -70,20 +65,18 @@ parser.add_argument("--val", default="./hw4_data/TrimmedVideos", type=str, help=
 
 opt = parser.parse_args()
 
-def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, criterion):
+def train(extractor, classifier, loader, optimizer, epoch, criterion):
     """ Train the classificaiton network. """
     trainloss = 0.0
     trainaccs = 0.0
     extractor.train()
     classifier.train()
     
-    for index, (data, label) in enumerate(train_loader, 1):
+    for index, (feature, label) in enumerate(loader, 1):
         batchsize = label.shape[0]
-        data, label = data.to(DEVICE).squeeze(0).view(-1, 3, 240, 320), label.to(DEVICE).view(-1)
+        feature, label = feature.view(batchsize, -1).to(DEVICE), label.to(DEVICE).view(-1)
         # print("Data.shape:  {}".format(data.shape))
         # print("Label.shape: {}".format(label.shape))
-        # print(data)
-        # print(data.dtype)
         
         #-----------------------------------------------------------------------------
         # Setup optimizer: clean the learning rate and set the learning rate (if need)
@@ -93,12 +86,9 @@ def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, cri
 
         #---------------------------------------
         # Get features, class predict:
-        #   data:          (batchsize * opt.sample, 3, 240, 320)
         #   feature:       (batchsize, 2048 * opt.sample)
         #   class predict: (batchsize, num_class)
         #---------------------------------------
-        feature = extractor(data).view(batchsize, -1)
-        # print("Feature.shape: {}".format(feature.shape))
         predict = classifier(feature)
         # print("Predict.shape: {}".format(predict.shape))
 
@@ -117,15 +107,15 @@ def train(extractor, classifier, train_loader, val_loader, optimizer, epoch, cri
         trainaccs += acc
 
         if index % opt.log_interval == 0:
-            print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2f}%] [loss: {:.4f}]".format(
-                epoch, index, len(train_loader), 100 * trainaccs / index, trainloss / index
+            print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+                epoch, index, len(loader), trainaccs / index, trainloss / index
             ))
 
     # Print the average performance at the end time of each epoch
-    trainloss = trainloss / len(train_loader)
-    trainaccs = trainaccs / len(train_loader)
-    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2f}%] [loss: {:.4f}]".format(
-        epoch, len(train_loader), len(train_loader), 100 * trainaccs, trainloss))
+    trainloss = trainloss / len(loader)
+    trainaccs = trainaccs / len(loader)
+    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(
+        epoch, len(loader), len(loader), trainaccs, trainloss))
 
     return extractor, classifier, trainloss, trainaccs
 
@@ -140,30 +130,30 @@ def val(extractor, classifier, loader, epoch, criterion, log_interval=10):
     #----------------------------
     # Calculate the accuracy, loss
     #----------------------------
-    for index, (data, label) in enumerate(loader, 1):
-        batchsize   = data.shape[0]
+    with torch.no_grad():
+        for index, (feature, label) in enumerate(loader, 1):
+            batchsize = label.shape[0]
         
-        data, label = data.view(-1, 3, 240, 320).to(DEVICE), label.type(torch.long).view(-1).to(DEVICE)
+            feature, label = feature.view(batchsize, -1).to(DEVICE), label.view(-1).to(DEVICE)
         
-        feature = extractor(data).view(batchsize, -1)
-        predict = classifier(feature)
+            predict = classifier(feature)
         
-        # loss
-        loss = criterion(predict, label)
-        valloss += loss.item()
+            # loss
+            loss = criterion(predict, label)
+            valloss += loss.item()
         
-        # Class Accuracy
-        predict = predict.cpu().detach().numpy()
-        label   = label.cpu().detach().numpy()
-        acc     = np.mean(np.argmax(predict, axis=1) == label)
-        valaccs += acc
+            # Class Accuracy
+            predict = predict.cpu().detach().numpy()
+            label   = label.cpu().detach().numpy()
+            acc     = np.mean(np.argmax(predict, axis=1) == label)
+            valaccs += acc
 
-        if index % log_interval == 0:
-            print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
+            if index % log_interval == 0:
+                print("[Epoch {}] [ {:4d}/{:4d} ]".format(epoch, index, len(loader)))
 
     valaccs = valaccs / len(loader)
     valloss = valloss / len(loader)
-    print("[Epoch {}] [Validation] [ {:4d}/{:4d} ] [acc: {:.2f}%] [loss: {:.4f}]".format(epoch, len(loader), len(loader), 100 * valaccs, valloss))
+    print("[Epoch {}] [Validation ] [ {:4d}/{:4d} ] [acc: {:.2%}] [loss: {:.4f}]".format(epoch, len(loader), len(loader), valaccs, valloss))
 
     return valaccs, valloss
 
@@ -175,32 +165,42 @@ def single_frame_recognition():
     extractor  = resnet50(pretrained=True).to(DEVICE)
     classifier = Classifier(2048 * opt.sample, opt.output_dim).to(DEVICE)
 
+    # Set optimizer
     if opt.optimizer == "Adam":
         optimizer = optim.Adam(classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), weight_decay=opt.weight_decay)
     elif opt.optimizer == "SGD":
         optimizer = optim.SGD(classifier.parameters(), lr=opt.lr, momentum=opt.momentum, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "ASGD":
+        optimizer = optim.ASGD(classifier.parameters(), lr=opt.lr, lambd=1e-4, alpha=0.75, t0=1000000.0, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "Adadelta":
+        optimizer = optim.Adadelta(classifier.parameters(), lr=opt.lr, rho=0.9, eps=1e-06, weight_decay=opt.weight_decay)
+    elif opt.optimizer == "Adagrad":
+        optimizer = optim.Adagrad(classifier.parameters(), lr=opt.lr, lr_decay=0, weight_decay=opt.weight_decay, initial_accumulator_value=0)
+    elif opt.optimizer == "SparseAdam":
+        optimizer = optim.SparseAdam(classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), eps=1e-08)
+    elif opt.optimizer == "Adamax":
+        optimizer = optim.Adamax(classifier.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2), eps=1e-08, weight_decay=opt.weight_dacay)
     else:
-        raise NotImplementedError
+        raise argparse.ArgumentError
 
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=opt.milestones, gamma=opt.gamma)
     
     criterion = nn.CrossEntropyLoss().to(DEVICE)
 
-    if opt.normalize:
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-    else:
-        transform = transforms.ToTensor()
+    transform = transforms.ToTensor()
 
-    train_set  = dataset.TrimmedVideos(opt.train, train=True, sample=4, transform=transform)
-    val_set    = dataset.TrimmedVideos(opt.val, train=False, sample=4, transform=transform)
-    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.threads)
-    val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=True, num_workers=opt.threads)
+    trainlabel   = os.path.join(opt.train, "label", "gt_train.csv")
+    trainfeature = os.path.join(opt.train, "feature", "train")
+    vallabel     = os.path.join(opt.val, "label", "gt_valid.csv")
+    valfeature   = os.path.join(opt.val, "feature", "valid")
 
-    print("Train: \t{}".format(len(train_set)))
-    print("Val: \t{}".format(len(val_set)))
+    train_set  = dataset.TrimmedVideos(None, trainlabel, trainfeature, sample=4, transform=transform)
+    val_set    = dataset.TrimmedVideos(None, vallabel, valfeature, sample=4, transform=transform)
+    train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, drop_last=True, num_workers=opt.threads)
+    val_loader   = DataLoader(val_set, batch_size=opt.batch_size, shuffle=False, drop_last=True, num_workers=opt.threads)
+
+    # Show the memory used by neural network
+    print("The neural network allocated GPU with {:.1f} MB".format(torch.cuda.memory_allocated() / 1024 / 1024))
     
     #------------------
     # Train the models
@@ -214,7 +214,7 @@ def single_frame_recognition():
         scheduler.step()
         
         # Save the train loss and train accuracy
-        extractor, classifier, loss, acc = train(extractor, classifier, train_loader, val_loader, optimizer, epoch, criterion)
+        extractor, classifier, loss, acc = train(extractor, classifier, train_loader, optimizer, epoch, criterion)
         trainloss.append(loss)
         trainaccs.append(acc)
 
@@ -226,14 +226,15 @@ def single_frame_recognition():
         # Save the epochs
         epochs.append(epoch)
 
-        with open(os.path.join(opt.log, "problem_1", opt.tag, 'statistics.txt'), 'w') as textfile:
-            textfile.write("\n".join(map(lambda x: str(x), (trainloss, trainaccs, valloss, valaccs, epochs))))
+        records = list(map(lambda x: np.array(x), (trainloss, trainaccs, valloss, valaccs, epochs)))
+        for record, name in zip(records, ('trainloss.txt', 'trainaccs.txt', 'valloss.txt', 'valaccs.txt', 'epochs.txt')):
+            np.savetxt(os.path.join(opt.log, "problem_1", opt.tag, name), record)
 
         if epoch % opt.save_interval == 0:
             savepath = os.path.join(opt.checkpoints, "problem_1", opt.tag, str(epoch) + '.pth')
             utils.saveCheckpoint(savepath, classifier, optimizer, scheduler, epoch)
 
-            draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs)
+        draw_graphs(trainloss, valloss, trainaccs, valaccs, epochs)
             
     return extractor, classifier
 
@@ -292,7 +293,7 @@ def details(path):
         for item, values in vars(opt).items():
             msg = "{:16} {}".format(item, values)
             print(msg)
-            textfile.write(msg)
+            textfile.write(msg + "\n")
 
 def main():
     """ Make the directory and check whether the dataset is exists """
@@ -310,7 +311,7 @@ def main():
     os.makedirs(os.path.join(opt.log, "problem_1", opt.tag), exist_ok=True)
 
     # Write down the training details (opt)
-    details(os.path.join(opt.log, opt.tag, "train_setting.txt"))
+    details(os.path.join(opt.log, "problem_1", opt.tag, "train_setting.txt"))
 
     # Train the video recognition model with single frame (cnn) method
     single_frame_recognition()

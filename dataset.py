@@ -67,7 +67,7 @@ class TrimmedVideos(Dataset):
         
         if self.sample:
             step  = video.shape[0] / self.sample
-            frame = np.around(np.arange(0, video.shape[0], step), decimals=0).type(int)
+            frame = np.around(np.arange(0, video.shape[0], step), decimals=0).astype(int)
             video = video[frame]
 
         # ---------------------------------------------------
