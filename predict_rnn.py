@@ -31,13 +31,13 @@ from rnn import LSTM_Net
 parser = argparse.ArgumentParser()
 
 # Basic Training setting
-parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+parser.add_argument("--batch_size", default=1, type=int, help="size of the batches")
 parser.add_argument("--downsample", default=12, type=int, help="the downsample ratio of the training data.")
-parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
+parser.add_argument("--dropout", default=0.2, type=float, help="the dropout probability of the recurrent network")
 # Model dimension setting
-parser.add_argument("--layers", default=2, help="the number of the recurrent layers")
+parser.add_argument("--layers", default=2, type=int, help="the number of the recurrent layers")
 parser.add_argument("--bidirectional", default=False, action="store_true", help="Use the bidirectional recurrent network")
-parser.add_argument("--hidden_dim", default=128, help="the dimension of the RNN's hidden layer")
+parser.add_argument("--hidden_dim", default=128, type=int, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Devices setting
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
@@ -81,7 +81,7 @@ def predict(extractor, model, loader):
                 finish += step
 
             features = pad_sequence(torch.split(features, seq_len, dim=0), batch_first=False)
-            features = pack_padded_sequence(video, seq_len, batch_first=False)
+            features = pack_padded_sequence(features, seq_len, batch_first=False)
             predict, _ = model(features)
             predict = predict.argmax(dim=1).cpu().tolist()
 
@@ -102,7 +102,7 @@ def main():
                     bidirectional=opt.bidirectional, seq_predict=False)
                 ).to(DEVICE)
     
-    predict_set = dataset.TrimmedVideos(opt.video, opt.label, None, transform=transforms.Compose([
+    predict_set = dataset.TrimmedVideos(opt.video, opt.label, None, downsample=opt.downsample, transform=transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ]))
@@ -112,7 +112,7 @@ def main():
     
     # Predict
     results = predict(extractor, recurrent, predict_loader)
-    np.savetxt(opt.output, results)
+    np.savetxt(opt.output, results, fmt='%d')
     print("Output File have been written to {}".format(opt.output))
 
 if __name__ == "__main__":
