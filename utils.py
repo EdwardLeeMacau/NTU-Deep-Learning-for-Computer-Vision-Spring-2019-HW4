@@ -61,11 +61,12 @@ def collate_fn_seq(batch):
     batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
     seq_len = [x[0].shape[0] for x in batch]
 
-    label      = pack_padded_sequence(pad_sequence([x[1] for x in batch], batch_first=False), seq_len, batch_first=False)
+    label      = pad_sequence([x[1] for x in batch], batch_first=False)
+    raw_length = [x[3] for x in batch]
     categories = [x[2] for x in batch]
-    batch      = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
+    batch      = pad_sequence([x[0] for x in batch], batch_first=False)
     
-    return (batch, label, seq_len, categories)
+    return (batch, label, seq_len, categories, raw_length)
 
 def selectDevice():
     use_cuda = torch.cuda.is_available()

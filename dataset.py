@@ -132,20 +132,21 @@ class FullLengthVideos(Dataset):
         if self.feature_path is not None:
             frames = np.load(os.path.join(self.feature_path, video_category + ".npy"))
         
-        # ----------------------------------------------------------
+        # ----------------------------------------------------------------------------------
         # downsample: 
         # rescale:
         # summarize:  Remove the frequently appears labels (The head and tail in this case)
         # sampling:   Sampling the (input, label) sequence
         # truncate:   TBPTT technique, need to crop the (input, label)
-        # ----------------------------------------------------------
+        # ----------------------------------------------------------------------------------
+        raw_length = len(frames)
+
         if self.downsample > 1:
             keep = np.arange(0, len(frames), self.downsample)
-            bias = np.zeros_like(keep)
-            frames = frames[keep + bias]
+            frames = frames[keep]
             
             if self.label_path is not None:
-                video_label = video_label[keep + bias] 
+                video_label = video_label[keep] 
 
         if self.summarize is not None:
             target = self.summarize
@@ -165,12 +166,14 @@ class FullLengthVideos(Dataset):
             video_label = video_label[mark[0]: mark[1]]
 
         if (self.truncate[0] > 0) or self.sampling:
-            length = self.truncate[0]
+            raw_length = len(frames)
+
+            length = min(self.truncate[0], len(frames))
             start  = random.randint(0, len(frames) - length)
 
             frames = frames[start: start + length]
             video_label = video_label[start: start + length]
-            # print("Sampling: ", start, start + length)
+            # print("Sampling: ", 0, start, start + length, raw_length)
 
         # -------------------------------------------------------------
         # Features Output dimension: (frames, 2048)
@@ -180,16 +183,16 @@ class FullLengthVideos(Dataset):
             if self.feature_path is not None:
                 tensor = self.transform(frames).type(torch.float32)
                 
-                return tensor.squeeze(0), video_label, video_category
+                return tensor.squeeze(0), video_label, video_category, raw_length
 
             if self.video_path is not None:
                 tensor = torch.zeros(len(frames), 3, 240, 320).type(torch.float32)
                 for i in range(len(frames)):
                     tensor[i] = self.transform(frames[i])
             
-                return tensor.squeeze(0), video_label, video_category
+                return tensor.squeeze(0), video_label, video_category, raw_length
 
-        return frames, video_label, video_category
+        return frames, video_label, video_category, raw_length
 
 def read_feature_unittest(video_path, label_path, feature_path):
     """ Read the videos in .npy format """
