@@ -36,35 +36,35 @@ DEVICE = utils.selectDevice()
 
 parser = argparse.ArgumentParser()
 # Basic Training setting
-parser.add_argument("--epochs", type=int, default=500, help="number of epochs of training")
-parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
-parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
+parser.add_argument("--epochs", type=int, default=1000, help="number of epochs of training")
+parser.add_argument("--batch_size", type=int, default=4, help="size of the batches")
+parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
 parser.add_argument("--gamma", type=float, default=0.1, help="The ratio of decaying learning rate")
-parser.add_argument("--milestones", type=int, nargs='*', default=[], help="The epoch to decay the learning rate")
-parser.add_argument("--optimizer", type=str, default="SGD", help="The optimizer to use in this training")
+parser.add_argument("--milestones", type=int, nargs='*', default=[100], help="The epoch to decay the learning rate")
+parser.add_argument("--optimizer", type=str, default="Adam", help="The optimizer to use in this training")
 parser.add_argument("--weight_decay", type=float, default=1e-5, help="weight regularization")
 parser.add_argument("--momentum", default=0.9, type=float, help="SGD Momentum, Default: 0.9")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--dropout", default=0.2, help="the dropout probability of the recurrent network")
 parser.add_argument("--train_downsample", default=4, type=int, help="the downsample ratio of the training data.")
-parser.add_argument("--val_downsample", default=4, type=int, help="the downsample ratio of the validation data.")
+parser.add_argument("--val_downsample", default=1, type=int, help="the downsample ratio of the validation data.")
 # Handle very long training data strategics
 parser.add_argument("--summarize", default=0, help="Remove the frames where the label is specified at the head / tail of the video.")
-parser.add_argument("--sampling", default=False, action="store_true", help="Random Sampling the (input, label) sequence")
-parser.add_argument("--k1", default=1, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0")
+parser.add_argument("--sampling", default=64, type=int, help="Random Sampling the (input, label) sequence")
+parser.add_argument("--k1", default=0, type=int, help="the k1 parameter of the truncated backpropagation through time, entire sequence for k1=0")
 parser.add_argument("--k2", default=0, type=int, help="the k2 parameter of the truncated backpropagation through time, entire sequence for k2=0")
 # Model dimension setting
 parser.add_argument("--activation", default="ReLU", help="the activation function use at training")
 parser.add_argument("--layers", default=2, help="the number of the recurrent layers")
 parser.add_argument("--bidirection", default=False, action="store_true", help="Use the bidirectional recurrent network")
-parser.add_argument("--hidden_dim", default=256, help="the dimension of the RNN's hidden layer")
+parser.add_argument("--hidden_dim", default=512, help="the dimension of the RNN's hidden layer")
 parser.add_argument("--output_dim", default=11, type=int, help="the number of the class to predict")
 # Model parameter initialization setting
 parser.add_argument("--weight_init", nargs='*', default=['orthogonal'], type=str, help="define the network weight parameter initialization methods")
 parser.add_argument("--bias_init", nargs='*', default=['forget_bias_0'], type=str, help="define the network bias parameter initialization methods")
 # Message logging, model saving setting
-parser.add_argument("--tag", default="20190603_tbptt", type=str, help="tag for this training")
+parser.add_argument("--tag", default="20190604_64_step5", type=str, help="tag for this training")
 parser.add_argument("--checkpoints", default="/media/disk1/EdwardLee/video/checkpoint", type=str, help="path to save the checkpoints")
 parser.add_argument("--step", type=int, default=1000, help="step to test the model performance")
 parser.add_argument("--save_interval", type=int, default=1, help="interval epoch between everytime saving the model.")
@@ -78,7 +78,7 @@ parser.add_argument("--cuda", default=True, help="Use cuda?")
 parser.add_argument("--threads", type=int, default=8, help="number of cpu threads to use during batch generation")
 # Load dataset, pretrain model setting
 parser.add_argument("--resume", type=str, help="Path to checkpoint (trained in Problem 3)")
-parser.add_argument("--pretrain", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
+parser.add_argument("--pretrain", default="/media/disk1/EdwardLee/video/checkpoint/problem_3/pretrain_layer2_downsample4_512.pth", type=str, help="The path to read the pretrained rnn network trained in Problem 2")
 parser.add_argument("--train", default="./hw4_data/FullLengthVideos", type=str, help="path to load train datasets")
 parser.add_argument("--val", default="./hw4_data/FullLengthVideos", type=str, help="path to load validation datasets")
 
@@ -94,8 +94,9 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
     count_0s  = 0
     total_len = 0
     
-    for _, (feature, label, seq_len, category, _) in enumerate(loader, 1):
+    for index, (feature, label, seq_len, category, _) in enumerate(loader, 1):
         batchsize = len(seq_len)
+        # print(seq_len)
         # hidden_state = torch.randn(opt.layers, batchsize, opt.hidden_dim).to(DEVICE)
         # cell_state   = torch.randn(opt.layers, batchsize, opt.hidden_dim).to(DEVICE)
         
@@ -106,14 +107,13 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         # optim = utils.set_optimizer_lr(optim, lr)
         optimizer.zero_grad()
 
-        #---------------------------------------
+        #-----------------------------------------------
         # Get features, class predict:
         #   feature:       (frames, batchsize, 2048)
         #   frame_predict: (frames, batchsize, num_class)
-        #---------------------------------------
-        # predict, (h, c) = recurrent(feature, hidden_state, cell_state)
+        #------------------------------------------------
+        # Execute the TPBTT technique
         if opt.k1:
-            # Execute the TPBTT technique
             for end in range(opt.k1, seq_len[0], opt.k1):
                 if end < opt.k2: continue
                 
@@ -139,7 +139,12 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         predict, _ = recurrent(feature)
         predict, label = predict.view(-1, opt.output_dim), label.view(-1)
 
-        loss = criterion(predict, label)
+        if index % 3:
+            mask = (label != 0)
+            loss = criterion(predict[mask], label[mask])
+        else:
+            loss = criterion(predict, label)
+        
         loss.backward()
         optimizer.step()
 
@@ -151,16 +156,16 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
         label     = label.cpu().detach().numpy()
         acc       = np.mean(np.argmax(predict, axis=1) == label)
         
-        count_0   = np.sum(np.argmax(predict, axis=1) == 0)
+        count_0   = np.sum(label == 0)
         count_0s  += count_0
         
         # Filter with the post process
         post_pred = visualize.post_process(np.argmax(predict, axis=1))
         post_acc  = np.mean(post_pred == label)
 
-        total_len += seq_len[0]
-        trainaccs += acc * seq_len[0]
-        postaccs  += post_acc * seq_len[0]
+        total_len += sum(seq_len)
+        trainaccs += acc * sum(seq_len)
+        postaccs  += post_acc * sum(seq_len)
 
         # for i in range(batchsize):
         #     predict_i = predict[0: seq_len[i], i]
@@ -184,12 +189,12 @@ def train(recurrent, loader, optimizer, epoch, criterion, max_trainaccs, min_tra
     trainloss = trainloss / len(loader.dataset)
     trainaccs = trainaccs / total_len
     postaccs  = postaccs / total_len
-    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} ({:+.2%}) -> {:.2%} ] [0: {:.2%}] [loss: {:.4f} ({:+.4f})]".format(
-            epoch, len(loader), len(loader), trainaccs, trainaccs - max_trainaccs, postaccs, count_0s / total_len, trainloss, trainloss - min_trainloss))
+    print("[Epoch {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%} ] [0: {:.2%} {:4d}] [loss: {:.4f}]".format(
+            epoch, len(loader), len(loader), trainaccs, postaccs, count_0s / total_len, count_0s, trainloss))
 
     return recurrent, trainaccs, trainloss
 
-def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, log_interval=10):
+def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, log_interval=10, visual=True):
     """ Validate the recurrent network. """
     recurrent.eval()
 
@@ -243,8 +248,8 @@ def val(recurrent: nn.Module, loader: DataLoader, epoch, criterion: nn.Module, l
             #     print("[Epoch {}] [Validation {}] [ {:4d}/{:4d} ] [acc: {:.2%} -> {:.2%}] [0: {:.2%}] [loss: {:.4f}]".format(
             #         epoch, index, len(loader), len(loader), acc, post_acc, count_0 / seq_len[0], loss.item()))
 
-            if epoch % opt.visual_interval == 0:
-                savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "test_" + category[0] + ".png")
+            if (epoch % opt.visual_interval == 0) and visual:
+                savepath = os.path.join(opt.log, "problem_3", opt.tag, "visualize", str(epoch), "valid_" + category[0] + ".png")
                 img_path = os.path.join(opt.val, "videos", "valid", category[0])
                 visualize.visualization(savepath, img_path, np.argmax(predict, axis=1), post_pred, label, sample=5, bar_height=20)
 
@@ -329,11 +334,31 @@ def temporal_action_segmentation():
     vallabel     = os.path.join(opt.val, "labels", "valid")
     valfeature   = os.path.join(opt.val, "feature", "valid")
     
-    train_set    = dataset.FullLengthVideos(None, trainlabel, trainfeature, downsample=opt.train_downsample, transform=transform, summarize=opt.summarize, sampling=opt.sampling, truncate=(0, 0))
+    train_set    = dataset.FullLengthVideos(
+                        None, trainlabel, trainfeature, 
+                        downsample=opt.train_downsample, 
+                        transform=transform, 
+                        summarize=opt.summarize, 
+                        sampling=opt.sampling, 
+                    )
     train_loader = DataLoader(train_set, batch_size=opt.batch_size, shuffle=True, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
-    val_set      = dataset.FullLengthVideos(None, vallabel, valfeature, downsample=opt.val_downsample, transform=transform, summarize=None, sampling=opt.sampling, truncate=(0, 0))
+    val_set      = dataset.FullLengthVideos(
+                        None, vallabel, valfeature, 
+                        downsample=opt.val_downsample, 
+                        transform=transform, 
+                        summarize=None, 
+                        sampling=0,
+                    )
     val_loader   = DataLoader(val_set, batch_size=1, shuffle=False, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
-    
+    val_set_2    = dataset.FullLengthVideos(
+                        None, vallabel, valfeature, 
+                        downsample=opt.train_downsample, 
+                        transform=transform, 
+                        summarize=None, 
+                        sampling=0
+                    )
+    val_loader_2 = DataLoader(val_set_2, batch_size=1, shuffle=False, collate_fn=utils.collate_fn_seq, num_workers=opt.threads)
+
     # Show the memory used by neural network
     print("The neural network allocated GPU with {:.1f} MB".format(torch.cuda.memory_allocated() / 1024 / 1024))
 
@@ -364,6 +389,8 @@ def temporal_action_segmentation():
         acc, loss = val(recurrent, val_loader, epoch, criterion)
         valloss.append(loss)
         valaccs.append(acc)
+
+        acc, loss = val(recurrent, val_loader_2, epoch, criterion, visual=False)
 
         # Save the epochs
         epochs.append(epoch)

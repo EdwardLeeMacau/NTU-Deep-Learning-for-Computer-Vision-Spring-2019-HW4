@@ -92,7 +92,7 @@ class TrimmedVideos(Dataset):
 
 class FullLengthVideos(Dataset):
     def __init__(self, video_path, label_path, feature_path, downsample=1, rescale=1, transform=None,
-                 summarize=False, sampling=False, truncate=(0, 0)):        
+                 summarize=None, sampling=0):        
         assert ((video_path is not None) or (feature_path is not None)), "Video_path or feature_path is needed for Dataset: FullLenghtVideos."
         assert ((not summarize) or (label_path is not None)), "Summarize can only be used in training mode, self.label_path shouldn't be 0."
         
@@ -104,7 +104,6 @@ class FullLengthVideos(Dataset):
         self.transform  = transform
         self.summarize  = summarize
         self.sampling   = sampling
-        self.truncate   = truncate
 
         if video_path is not None:
             self.categories = [folder for folder in os.listdir(video_path)]
@@ -165,10 +164,10 @@ class FullLengthVideos(Dataset):
             frames = frames[mark[0]: mark[1]]
             video_label = video_label[mark[0]: mark[1]]
 
-        if (self.truncate[0] > 0) or self.sampling:
+        if self.sampling:
             raw_length = len(frames)
 
-            length = min(self.truncate[0], len(frames))
+            length = min(self.sampling, len(frames))
             start  = random.randint(0, len(frames) - length)
 
             frames = frames[start: start + length]
