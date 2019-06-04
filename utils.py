@@ -52,7 +52,10 @@ def collate_fn(batch):
     batch   = sorted(batch, key=lambda x: x[0].shape[0], reverse=True)
     seq_len = [x[0].shape[0] for x in batch]
 
-    label = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
+    label = None
+    if batch[0][1] is not None:
+        label = torch.cat([x[1].unsqueeze(0) for x in batch], dim=0)
+    
     batch = pack_padded_sequence(pad_sequence([x[0] for x in batch], batch_first=False), seq_len, batch_first=False)
     
     return (batch, label, seq_len)

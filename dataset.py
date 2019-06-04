@@ -42,11 +42,11 @@ class TrimmedVideos(Dataset):
         self.sample     = sample
         self.transform  = transform
  
-        if self.label_path is not None:
-            self.video_list, self.len = reader.getVideoList(self.label_path)
-        else:
-            categories = os.listdir(self.video_path)
-            self.video_list = [name for name in os.path.join(self.video_path, category) for category in categories]
+        self.video_list, self.len = reader.getVideoList(self.label_path)
+        
+        # else:
+        #     categories = os.listdir(self.video_path)
+        #     self.video_list = [name for name in os.path.join(self.video_path, category) for category in categories]
 
     def __len__(self):
         return self.len
@@ -54,7 +54,10 @@ class TrimmedVideos(Dataset):
     def __getitem__(self, index):
         video_name     = self.video_list['Video_name'][index]
         video_category = self.video_list['Video_category'][index]
-        video_label    = torch.LongTensor([self.video_list['Action_labels'][index]])
+        
+        video_label    = None
+        if 'Action_labels' in self.video_list:
+            video_label = torch.LongTensor([self.video_list['Action_labels'][index]])
 
         # ---------------------------------------------------------------
         # Sample for HW4.1, pick the fixed number of frames 
