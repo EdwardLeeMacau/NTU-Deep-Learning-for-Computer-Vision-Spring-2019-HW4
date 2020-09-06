@@ -6,8 +6,6 @@
 
 import argparse
 import datetime
-import logging
-import logging.config
 import os
 import random
 from datetime import date
@@ -16,17 +14,12 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
-import torch.utils.data
-from matplotlib import pyplot as plt
 from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from torch.nn.utils.rnn import pad_packed_sequence
-from tqdm import tqdm
 
-from cnn import resnet50
 import dataset
 import utils
+from cnn import resnet50
 
 DEVICE = utils.selectDevice()
 

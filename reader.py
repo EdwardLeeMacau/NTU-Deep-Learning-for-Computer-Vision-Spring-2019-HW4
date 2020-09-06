@@ -2,22 +2,19 @@
   FileName     [ reader.py ]
   PackageName  [ HW4 ]
   Synopsis     [ Sample code to load an video ]
-
-  Library:
-    scikit-video    1.1.11
-    numpy           1.16.2
-    ffmpeg
-    ffprobe
 """
+
+import collections
+import csv
+import os
+import pprint
 
 import numpy as np
 import pandas as pd
-import skvideo.io
+
 import skimage.transform
-import csv
-import collections
-import os
-import pprint
+import skvideo.io
+
 
 def readShortVideo(video_path, video_category, video_name, downsample_factor=12, rescale_factor=1):
     '''

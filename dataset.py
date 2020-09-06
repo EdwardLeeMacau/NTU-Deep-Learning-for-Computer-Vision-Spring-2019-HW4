@@ -196,52 +196,6 @@ class FullLengthVideos(Dataset):
 
         return frames, video_label, video_category, raw_length
 
-def read_feature_unittest(video_path, label_path, feature_path):
-    """ Read the videos in .npy format """
-    dataset = TrimmedVideos(video_path, label_path, feature_path, downsample=1, transform=transforms.Compose([
-        transforms.ToTensor(),
-    ]))
-
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
-
-    for index, (data, label, category, name) in enumerate(dataloader, 1):
-        data = data.squeeze(0)
-        print("{:4d} {:16s} {:2d} {}".format(
-            index, str(list(data.shape)), label[0].item(), os.path.join(feature_path, category[0], name[0] + ".npy")))
-
-    return
-
-def video_unittest(video_path, label_path, feature_path):
-    """ Read the videos in .mp4 format """
-    dataset = TrimmedVideos(video_path, label_path, feature_path, downsample=1, transform=transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]))
-
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
-    
-    for index, (data, label, category, name) in enumerate(dataloader, 1):
-        data = data.squeeze(0)
-        print("{:4d} {:16d} {:2d} {}".format(
-            index, data.shape, label[0], os.path.join(feature_path, category[0], name[0] + ".npy")))
-            
-    return
-
-def predict_unittest(video_path, data_path):
-    """ Read the videos in .mp4 format, without the ground truth file """
-    dataset = TrimmedVideos(video_path, None, None, downsample=1, transform=transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]))
-
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=False, num_workers=8)
-
-    for index, (data, category, name) in enumerate(dataloader, 1):
-        data = data.squeeze(0)
-        print("{:4d} {:16d} {}".format(
-            index, data.shape, os.path.join(video_path, category[0], name[0] + ".mp4")))
-
-    return
 
 def main():
     videopath = "./hw4_data/TrimmedVideos/video/train"

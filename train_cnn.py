@@ -5,8 +5,6 @@
 """
 
 import argparse
-import logging
-import logging.config
 import os
 import random
 
@@ -20,10 +18,10 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from cnn import resnet50
-from classifier import Classifier
 import dataset
 import utils
+from classifier import Classifier
+from cnn import resnet50
 
 # Set as true when the I/O shape of the model is fixed
 cudnn.benchmark = True

@@ -11,17 +11,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+import torch.utils.model_zoo as model_zoo
 from torch.autograd import Function
+from torch.utils import model_zoo as model_zoo
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torch.utils import model_zoo
 
 import torchsummary
-
 # import dataset
 import utils
-
-import torch.utils.model_zoo as model_zoo
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',

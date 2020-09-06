@@ -2,12 +2,6 @@
   FileName     [ tsne.py ]
   PackageName  [ HW4 ]
   Synopsis     [ HW4-1 t-SNE video feature visualiztion ]
-
-  Library:
-    scikit-video    1.1.11
-    numpy           1.16.2
-    ffmpeg
-    ffprobe
 """
 
 import argparse
@@ -22,13 +16,14 @@ import torchvision.transforms as transforms
 from PIL import Image
 from sklearn.manifold import TSNE
 from torch.autograd import Variable
+from torch.nn.utils.rnn import (pack_padded_sequence, pad_packed_sequence,
+                                pad_sequence)
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 
-from dataset import TrimmedVideos
 import utils
-from rnn import LSTM_Net
 from classifier import Classifier
+from dataset import TrimmedVideos
+from rnn import LSTM_Net
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resume", default="./model/problem2.pth", type=str, help='The directory of model to load.')
@@ -103,15 +98,20 @@ def dimension_reduction_rnn(fname, loader, model=None):
     return
 
 def plot_features(fname, features: np.ndarray, labels: np.ndarray, plot_num, title=""):
-    '''
-      Params:
-      - fname     : saved filename
-      - features  : dim [n, 2]
-      - labels    : dim [n]
-      - plot_num  : 
+    """
+    Parameters
+    ----------
+    fname : str
+        saved filename
+
+    features : 
+        dim [n, 2]
     
-      Return: None
-    '''
+    labels : 
+        dim [n]
+    
+    plot_num : 
+    """
     colors = plt.get_cmap('Set1')
 
     plt.figure(figsize=(12.8, 7.2))

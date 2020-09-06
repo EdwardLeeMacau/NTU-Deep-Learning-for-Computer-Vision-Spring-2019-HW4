@@ -5,11 +5,11 @@
 """
 
 import argparse
-import datetime
-import os
-import itertools
-import random
 import collections
+import datetime
+import itertools
+import os
+import random
 
 import numpy as np
 import torch
@@ -22,10 +22,10 @@ from torch.nn.utils.rnn import (pack_padded_sequence, pad_packed_sequence,
                                 pad_sequence)
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from tqdm import tqdm
 
 import dataset
 import visualize
+from tqdm import tqdm
 
 # Set as true when the I/O shape of the model is fixed
 
